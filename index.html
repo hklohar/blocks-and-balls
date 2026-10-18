@@ -4,14 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0a0e1c">
-  <title>Blocks &amp; Balls: a Tetris-like game with rolling marbles</title>
+  <title>Arcade: Blocks &amp; Balls and Doodle Wheel</title>
+  <meta name="description" content="Two browser games: Blocks &amp; Balls (Tetris with rolling marbles) and Doodle Wheel (a snake game with ropes, a bonus spin wheel and collectible creatures).">
   <link rel="icon" href="data:,">
   <link rel="apple-touch-icon" href="data:,">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app" id="app">
+  <nav class="arcade-tabs" role="tablist" aria-label="Choose a game">
+    <button type="button" role="tab" class="arcade-tab" id="tabBlocks" data-game="blocks" aria-controls="app" aria-selected="true"><span class="tab-ico" aria-hidden="true">🧱</span>Blocks &amp; Balls</button>
+    <button type="button" role="tab" class="arcade-tab" id="tabDoodle" data-game="doodle" aria-controls="doodleApp" aria-selected="false"><span class="tab-ico" aria-hidden="true">🎡</span>Doodle Wheel</button>
+  </nav>
+
+  <div class="app" id="app" role="tabpanel" aria-labelledby="tabBlocks">
     <main class="stage">
       <div class="board-wrap" id="boardWrap">
         <div class="board-inner" id="boardInner">
@@ -27,10 +33,6 @@
       <header class="brand">
         <h1>Blocks <span class="amp">&amp;</span> <span class="balls-word">Balls</span></h1>
         <p class="tagline">Tetris, except some of the pieces roll.</p>
-        <nav class="arcade" aria-label="Arcade games">
-          <a href="index.html" class="current" aria-current="page">Blocks &amp; Balls</a>
-          <a href="snack.html">Snack and Letters</a>
-        </nav>
       </header>
 
       <section class="stats">
@@ -96,6 +98,66 @@
       <button type="button" data-action="drop" class="tc-drop" aria-label="Hard drop">⤓</button>
     </nav>
   </div>
+  <div class="app dw-app" id="doodleApp" role="tabpanel" aria-labelledby="tabDoodle" hidden>
+    <main class="stage">
+      <div class="board-wrap dw-board-wrap" id="dwBoardWrap">
+        <div class="board-inner" id="dwBoardInner">
+          <canvas id="dwBoard" aria-label="Doodle Wheel board"></canvas>
+          <button type="button" class="primary dw-spin" id="dwSpin" hidden>Spin!</button>
+          <div class="overlay show" id="dwOverlay" aria-live="polite">
+            <div class="overlay-card" id="dwOverlayCard"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <aside class="side dw-side">
+      <header class="brand">
+        <h1>Doodle <span class="balls-word">Wheel</span></h1>
+        <p class="tagline">Eat cute animals, grab ropes, spin for bonuses, catch creatures.</p>
+      </header>
+
+      <section class="stats dw-stats">
+        <div class="stat stat-score"><span class="label">Score</span><span class="value" id="dwScore">0</span></div>
+        <div class="stat"><span class="label">Ropes</span><span class="value" id="dwRopes">0</span></div>
+        <div class="stat"><span class="label">Level</span><span class="value" id="dwLevel">1</span></div>
+        <div class="stat"><span class="label">Best</span><span class="value" id="dwHigh">0</span></div>
+      </section>
+
+      <section class="panel dw-tray-panel">
+        <h2>Collection <span class="dw-tray-count" id="dwTrayCount">0/8</span></h2>
+        <div class="dw-tray" id="dwTray" aria-label="Creature collection"></div>
+      </section>
+
+      <section class="buttons">
+        <button type="button" id="dwStart" class="primary">Start</button>
+        <button type="button" id="dwPause">Pause</button>
+        <button type="button" id="dwRestart">Restart</button>
+      </section>
+
+      <section class="panel help">
+        <h2>How to play</h2>
+        <ul>
+          <li><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> / <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Steer</li>
+          <li><kbd>Space</kbd> / <kbd>Enter</kbd> Spin the wheel</li>
+          <li><kbd>P</kbd> / <kbd>Esc</kbd> Pause</li>
+        </ul>
+        <p class="hint">Animals grow the snake. Each rope spins the wheel (×1 to ×10), and every 3 ropes speeds you up. After 6 ropes, creatures appear by the ropes. Don't hit the walls or yourself!</p>
+      </section>
+
+      <footer class="site-footer">© 2026 Harish Lohar · <a href="mailto:hklohar@gmail.com">hklohar@gmail.com</a></footer>
+    </aside>
+
+    <nav class="touch-controls dw-dpad" id="dwDpad" aria-label="Arrow pad">
+      <button type="button" data-dir="up" class="dp-up" aria-label="Up">▲</button>
+      <button type="button" data-dir="left" class="dp-left" aria-label="Left">◀</button>
+      <button type="button" data-dir="down" class="dp-down" aria-label="Down">▼</button>
+      <button type="button" data-dir="right" class="dp-right" aria-label="Right">▶</button>
+    </nav>
+  </div>
+
+  <script src="arcade.js"></script>
   <script src="game.js"></script>
+  <script src="doodle.js"></script>
 </body>
 </html>

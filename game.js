@@ -748,7 +748,9 @@
     var SCROLL_KEYS = { ArrowLeft: 1, ArrowRight: 1, ArrowUp: 1, ArrowDown: 1, ' ': 1, Spacebar: 1 };
     function isFormControl(el) { return el && (el.tagName === 'SELECT' || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'); }
 
+    function arcadeOther() { return root.arcade && root.arcade.current && root.arcade.current !== 'blocks'; }
     window.addEventListener('keydown', function (e) {
+      if (arcadeOther()) return; // another arcade game has focus
       var k = e.key;
       var playing = active() && !game.paused;
       if (SCROLL_KEYS[k] && !(isFormControl(e.target) && !playing)) e.preventDefault();
@@ -1157,6 +1159,12 @@
       syncUI(false);
       requestAnimationFrame(frame);
     }
+
+    // hooks for the arcade tab switcher
+    root.blocksUI = {
+      pause: function () { releaseAll(); if (active() && !game.paused) setPaused(true); },
+      resize: resize
+    };
 
     resize();
     startOverlay();

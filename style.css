@@ -9,6 +9,8 @@
   --ball: #fb7185;
   --accent: linear-gradient(90deg, #22d3ee, #818cf8 45%, #f472b6 75%, #fb923c);
   --radius: 14px;
+  --tabs-h: 46px;
+  --tabs-total: calc(var(--tabs-h) + env(safe-area-inset-top, 0px));
   color-scheme: dark;
 }
 
@@ -32,8 +34,8 @@ button, select { font: inherit; color: inherit; }
 
 /* ---------- Layout (desktop) ---------- */
 .app {
-  height: 100vh;
-  height: 100dvh;
+  height: calc(100vh - var(--tabs-total));
+  height: calc(100dvh - var(--tabs-total));
   display: grid;
   grid-template-columns: auto minmax(250px, 300px);
   grid-template-rows: 1fr auto;
@@ -45,12 +47,12 @@ button, select { font: inherit; color: inherit; }
 }
 
 .stage { grid-area: stage; display: flex; align-items: center; justify-content: center; min-height: 0; }
-.side { grid-area: side; display: flex; flex-direction: column; gap: 10px; max-height: calc(100dvh - 40px); min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.side { grid-area: side; display: flex; flex-direction: column; gap: 10px; max-height: calc(100dvh - 40px - var(--tabs-total)); min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .touch-controls { grid-area: touch; }
 
 .board-wrap {
   position: relative;
-  height: calc(100dvh - 40px);
+  height: calc(100dvh - 40px - var(--tabs-total));
   max-height: 900px;
   aspect-ratio: 1 / 2;
   max-width: calc(100vw - 380px);
@@ -85,12 +87,6 @@ button, select { font: inherit; color: inherit; }
 }
 .brand .amp { opacity: 0.7; }
 .brand .tagline { margin: 4px 0 0; color: var(--muted); font-size: 0.85rem; }
-
-/* ---------- Arcade switcher ---------- */
-.arcade { display: inline-flex; margin-top: 8px; padding: 3px; gap: 2px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--panel-border); }
-.arcade a { padding: 4px 10px; border-radius: 999px; font-size: 0.74rem; font-weight: 700; color: var(--muted); text-decoration: none; white-space: nowrap; }
-.arcade a:hover { color: var(--text); }
-.arcade a.current { color: #fff; background: linear-gradient(135deg, #6366f1, #ec4899); }
 
 /* ---------- Panels ---------- */
 .panel, .stat {
@@ -275,7 +271,7 @@ body.touch .touch-controls { display: grid; }
     justify-content: stretch;
     align-content: stretch;
     gap: 8px;
-    padding: max(8px, env(safe-area-inset-top)) 10px max(8px, env(safe-area-inset-bottom));
+    padding: 6px 10px max(8px, env(safe-area-inset-bottom));
   }
   .side {
     display: grid;
@@ -289,10 +285,8 @@ body.touch .touch-controls { display: grid; }
     gap: 6px;
     overflow: visible;
   }
-  .brand { grid-area: brand; display: flex; align-items: center; min-width: 0; }
-  .brand h1 { display: none; }
-  .arcade { margin-top: 0; }
-  .arcade a { padding: 4px 9px; font-size: 0.72rem; }
+  .brand { grid-area: brand; display: flex; align-items: baseline; }
+  .brand h1 { font-size: 1.15rem; }
   .brand .tagline, .help, .hint { display: none; }
   .stats { grid-area: stats; grid-template-columns: repeat(4, 1fr); gap: 5px; }
   .stat, .stat-score { grid-column: auto; padding: 4px 6px; border-radius: 10px; }
@@ -321,6 +315,97 @@ body.touch .touch-controls { display: grid; }
 @media (max-height: 880px) and (min-width: 821px) and (min-aspect-ratio: 4/5) {
   .help, .switch-panel .hint { display: none; }
   .next-panel canvas { height: 120px; }
+}
+
+/* ---------- Arcade tabs ---------- */
+.app[hidden] { display: none !important; }
+.arcade-tabs {
+  height: var(--tabs-total);
+  padding: env(safe-area-inset-top, 0px) 10px 0;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.arcade-tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 16px;
+  border-radius: 999px;
+  font-size: 0.88rem; font-weight: 700;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+  white-space: nowrap;
+}
+.arcade-tab .tab-ico { font-size: 1rem; line-height: 1; }
+.arcade-tab.active {
+  color: #fff;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.55), rgba(236, 72, 153, 0.45));
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 4px 16px rgba(236, 72, 153, 0.22);
+}
+.arcade-tab:focus-visible { outline: 2px solid #818cf8; outline-offset: 2px; }
+
+/* ---------- Doodle Wheel ---------- */
+.dw-board-wrap { aspect-ratio: 4 / 5; max-width: calc(100vw - 380px); }
+.dw-board-wrap .board-inner { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 20px 60px rgba(0, 0, 0, 0.55), 0 0 80px rgba(52, 211, 153, 0.12); }
+.dw-app .brand h1 { background: linear-gradient(90deg, #4ade80, #22d3ee 40%, #facc15 70%, #f472b6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.dw-stats { grid-template-columns: repeat(3, 1fr); }
+.dw-tray-count { margin-left: auto; letter-spacing: 0.04em; text-transform: none; color: #fde68a; font-weight: 700; }
+.dw-tray { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.dw-slot {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 4px 2px 3px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+}
+.dw-slot canvas { width: 40px; height: 40px; filter: brightness(0) invert(0.35); opacity: 0.45; transition: filter 0.3s, opacity 0.3s; }
+.dw-slot-name { font-size: 0.62rem; color: var(--muted); font-weight: 700; }
+.dw-slot.got { border-style: solid; border-color: rgba(253, 230, 138, 0.35); background: rgba(253, 230, 138, 0.07); }
+.dw-slot.got canvas { filter: none; opacity: 1; }
+.dw-slot.got .dw-slot-name { color: var(--text); }
+.dw-count { position: absolute; top: 2px; right: 4px; font-size: 0.62rem; font-weight: 800; color: #fde68a; }
+.dw-slot.pop { animation: slotPop 0.6s ease; }
+@keyframes slotPop { 0% { transform: scale(1); } 35% { transform: scale(1.25) rotate(-6deg); box-shadow: 0 0 18px rgba(253, 230, 138, 0.7); } 100% { transform: scale(1); } }
+.dw-spin {
+  position: absolute; left: 50%; bottom: 7%;
+  transform: translateX(-50%);
+  min-width: 46%; padding: 12px 18px;
+  font-size: 1.1rem; font-weight: 800; letter-spacing: 0.02em;
+  border-radius: 999px; z-index: 2;
+  animation: spinPulse 1s ease-in-out infinite;
+}
+.dw-spin[hidden] { display: none; }
+@keyframes spinPulse { 50% { transform: translateX(-50%) scale(1.06); } }
+.dw-final { margin: 10px 0 0; font-size: 0.85rem; color: var(--muted); }
+.dw-final b { color: var(--text); }
+.dw-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-top: 6px; }
+.dw-chip { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px 2px 2px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); color: var(--text); font-size: 0.75rem; font-weight: 700; }
+.dw-chip img { width: 24px; height: 24px; }
+.dw-none { margin-top: 4px; font-size: 0.78rem; }
+.overlay-card .touch-only { display: none; }
+body.touch .overlay-card .touch-only { display: block; }
+.dw-dpad { grid-template-columns: repeat(3, 1fr); grid-template-areas: ". up ." "left down right"; gap: 6px; }
+.dw-dpad .dp-up { grid-area: up; } .dw-dpad .dp-left { grid-area: left; } .dw-dpad .dp-down { grid-area: down; } .dw-dpad .dp-right { grid-area: right; }
+
+@media (max-width: 820px), (max-aspect-ratio: 4/5) {
+  :root { --tabs-h: 42px; }
+  .arcade-tab { padding: 6px 12px; font-size: 0.8rem; }
+  .dw-side {
+    grid-template-columns: 1fr;
+    grid-template-areas: "brand" "stats" "tray" "buttons" "footer";
+  }
+  .dw-stats { grid-template-columns: repeat(4, 1fr); }
+  .dw-tray-panel { grid-area: tray; padding: 4px 6px; border-radius: 10px; }
+  .dw-tray-panel h2 { display: none; }
+  .dw-tray { grid-template-columns: repeat(8, 1fr); gap: 3px; }
+  .dw-slot { padding: 1px 0 0; border-radius: 7px; }
+  .dw-slot canvas { width: 26px; height: 26px; }
+  .dw-slot-name { font-size: 0.45rem; letter-spacing: -0.02em; }
+  .dw-count { top: 0; right: 1px; font-size: 0.5rem; }
+  .dw-board-wrap { aspect-ratio: auto; max-width: none; }
+  .dw-dpad { gap: 5px; }
+  .dw-dpad button { height: 42px; }
+  .dw-spin { padding: 10px 14px; font-size: 1rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
