@@ -10,3 +10,7 @@ A Tetris-like browser game with a twist: alongside the classic tetrominoes, some
 - Touch: on-screen buttons plus tap/drag/flick gestures
 
 Plain HTML, CSS and JavaScript with no build step or dependencies. Open `index.html` directly or serve the folder.
+
+---
+
+Copyright (c) 2026 Harish Lohar <hklohar@gmail.com>. All rights reserved.
