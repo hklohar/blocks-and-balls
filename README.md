@@ -6,8 +6,9 @@ Two small browser games on one page, in plain HTML, CSS and JavaScript with no b
 
 ## Blocks & Balls (`game.js`)
 A Tetris-like game where some pieces are glossy balls that roll off ledges and settle like marbles.
-- Modes: Classic, Balls, Mixed (~30% balls), Alternating (waves of 4)
-- Switch (C) turns the falling piece between block and ball form (limited charges)
+- Modes: Classic, Balls, Mixed (~50% balls), Alternating (waves of 2)
+- Switch (C) turns the falling piece between block and ball form: 5 charges, +1 every 2 lines and +1 per level-up
+- Level up every 6 lines; gravity speeds up from 800 ms/row at level 1 to about 100 ms by level 10 (50 ms floor). From level 5, some balls are a rolling variant (white swirl) that rolls further
 - Keyboard: ←/→ move, ↑/Space rotate, ↓ soft drop, Shift/Enter hard drop, P pause
 - Touch: on-screen buttons plus tap/drag/flick gestures
 

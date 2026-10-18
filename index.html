@@ -37,7 +37,7 @@
 
       <section class="stats">
         <div class="stat stat-score"><span class="label">Score</span><span class="value" id="score">0</span></div>
-        <div class="stat"><span class="label">Level</span><span class="value" id="level">1</span></div>
+        <div class="stat"><span class="label">Level</span><span class="value" id="level">1</span><span class="sub" title="Fall speed vs level 1">Speed <b id="speed">1.0×</b></span></div>
         <div class="stat"><span class="label">Lines</span><span class="value" id="lines">0</span></div>
         <div class="stat"><span class="label">Best</span><span class="value" id="high">0</span></div>
       </section>
@@ -53,7 +53,7 @@
           <div class="dots" id="switchDots" title="Switch charges"></div>
           <button type="button" id="btnSwitch" class="small">Block ⇄ Ball</button>
         </div>
-        <p class="hint" id="switchHint">Turns the falling piece into balls (or back into a block). You get 1 charge back every 5 lines.</p>
+        <p class="hint" id="switchHint">Turns the falling piece into balls (or back into a block). You get 1 charge back every 2 lines, plus 1 on every level-up.</p>
       </section>
 
       <section class="panel mode-panel">
@@ -61,7 +61,7 @@
         <select id="mode" aria-label="Game mode">
           <option value="classic">Classic (blocks only)</option>
           <option value="balls">Balls only</option>
-          <option value="mixed" selected>Mixed (30% balls)</option>
+          <option value="mixed" selected>Mixed (50% balls)</option>
           <option value="alternating">Alternating waves</option>
         </select>
         <p class="hint" id="modeInfo"></p>

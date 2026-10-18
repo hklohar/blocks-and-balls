@@ -112,7 +112,9 @@ button, select { font: inherit; color: inherit; }
 .stat .label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); }
 .stat .value { font-size: 1.2rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .stat-score .value { font-size: 1.9rem; }
-.stat .value.bump { animation: bump 0.35s ease; }
+.stat .value.bump, .stat .sub b.bump { animation: bump 0.35s ease; }
+.stat .sub { font-size: 0.66rem; color: var(--muted); white-space: nowrap; }
+.stat .sub b { color: #7dd3fc; font-variant-numeric: tabular-nums; display: inline-block; }
 @keyframes bump { 30% { transform: scale(1.12); color: #fde68a; } }
 
 .next-panel canvas { width: 100%; height: 150px; display: block; }
@@ -292,6 +294,7 @@ body.touch .touch-controls { display: grid; }
   .stat, .stat-score { grid-column: auto; padding: 4px 6px; border-radius: 10px; }
   .stat .label { font-size: 0.56rem; letter-spacing: 0.08em; }
   .stat .value, .stat-score .value { font-size: 0.98rem; }
+  .stat .sub { font-size: 0.52rem; }
   .next-panel { grid-area: next; padding: 6px; border-radius: 10px; }
   .next-panel h2 { margin-bottom: 2px; font-size: 0.58rem; }
   .next-panel canvas { height: 100px; }

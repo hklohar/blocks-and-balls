@@ -19,10 +19,17 @@
   var CLEAR_TIME = 420;      // ms line-clear animation
   var BOUNCE_TIME = 520;     // ms landing bounce animation
   var MAX_ROLLS = 3;         // diagonal rolls a ball may make per settle (it loses momentum)
-  var MAX_SWITCHES = 3;
-  var LINES_PER_CHARGE = 5;
-  var WAVE_SIZE = 4;         // Alternating mode: pieces per wave
-  var BALL_RATIO_MIXED = 0.3;
+  var MAX_ROLLS_FAR = 7;     // "rolling" ball variant (from level 5) keeps its momentum longer
+  var FAR_LEVEL = 5;
+  var FAR_CHANCE = 0.3;      // share of ball pieces that are the rolling variant from FAR_LEVEL
+  var MAX_SWITCHES = 5;
+  var LINES_PER_CHARGE = 2;
+  var LINES_PER_LEVEL = 6;
+  var WAVE_SIZE = 2;         // Alternating mode: pieces per wave
+  var BALL_RATIO_MIXED = 0.5;
+  var GRAVITY_START = 800;   // ms per row at level 1
+  var GRAVITY_RATIO = 0.7937; // x per level: ~100 ms by level 10
+  var GRAVITY_FLOOR = 50;
   var BALL_BONUS = 25;       // per ball in a cleared row, x level
   var LINE_SCORES = [0, 100, 300, 500, 800];
 
@@ -102,7 +109,9 @@
       onEvent: null,
       constants: {
         SETTLE_STEP: SETTLE_STEP, CLEAR_TIME: CLEAR_TIME, BOUNCE_TIME: BOUNCE_TIME,
-        WAVE_SIZE: WAVE_SIZE, LINES_PER_CHARGE: LINES_PER_CHARGE
+        WAVE_SIZE: WAVE_SIZE, LINES_PER_CHARGE: LINES_PER_CHARGE, LINES_PER_LEVEL: LINES_PER_LEVEL,
+        MAX_SWITCHES: MAX_SWITCHES, BALL_RATIO_MIXED: BALL_RATIO_MIXED, MAX_ROLLS: MAX_ROLLS, MAX_ROLLS_FAR: MAX_ROLLS_FAR,
+        FAR_LEVEL: FAR_LEVEL, GRAVITY_START: GRAVITY_START, GRAVITY_FLOOR: GRAVITY_FLOOR
       }
     };
     var linesSinceCharge = 0;
@@ -151,7 +160,8 @@
         default: form = rng() < BALL_RATIO_MIXED ? 'ball' : 'block';
       }
       g.genCount++;
-      return { shape: form === 'block' ? fromBag() : randomBallShape(), form: form };
+      var far = form === 'ball' && g.level >= FAR_LEVEL && rng() < FAR_CHANCE;
+      return { shape: form === 'block' ? fromBag() : randomBallShape(), form: form, far: far };
     }
 
     function collides(m, x, y) {
@@ -178,6 +188,7 @@
       var d = g.queue.shift();
       g.queue.push(nextDescriptor());
       var p = makePiece(d.shape, d.form);
+      p.far = !!d.far;
       g.chain = 0;
       g.gravT = 0; g.lockT = 0; g.lockResets = 0;
       g.switchUsed = false;
@@ -268,6 +279,7 @@
       var p = g.cur;
       p.form = p.form === 'ball' ? 'block' : 'ball';
       p.color = colorFor(p.shape, p.form);
+      if (p.form === 'block') p.far = false;
       g.switches--;
       g.switchUsed = true;
       emit('switch', { form: p.form });
@@ -297,6 +309,7 @@
           type: p.form, color: p.color, shape: p.shape,
           moving: p.form === 'ball', fx: x, fy: y, bounce: -1, rolls: 0
         };
+        if (p.form === 'ball' && p.far) g.board[y][x].far = true;
       }
       g.cur = null;
       g.softDrop = g.softDrop; // keep held state
@@ -329,7 +342,7 @@
                 var nx = x + dx;
                 if (nx >= 0 && nx < COLS && !b[y][nx] && !b[y + 1][nx]) opts2.push(nx);
               }
-              if (opts2.length && (c.rolls || 0) < MAX_ROLLS) {
+              if (opts2.length && (c.rolls || 0) < (c.far ? MAX_ROLLS_FAR : MAX_ROLLS)) {
                 tx = opts2.length === 2 ? opts2[rng() < 0.5 ? 0 : 1] : opts2[0];
                 ty = y + 1;
                 c.rolls = (c.rolls || 0) + 1;
@@ -397,15 +410,17 @@
         linesSinceCharge -= LINES_PER_CHARGE;
         if (g.switches < MAX_SWITCHES) g.switches++;
       }
-      var newLevel = 1 + Math.floor(g.lines / 10);
+      var newLevel = 1 + Math.floor(g.lines / LINES_PER_LEVEL);
       var leveled = newLevel > g.level;
+      var prevInterval = g.gravityInterval();
+      if (leveled) g.switches = Math.min(MAX_SWITCHES, g.switches + (newLevel - g.level)); // bonus charge per level-up
       g.level = newLevel;
       g.clearRows = rows.slice();
       g.clearT = 0;
       g.phase = 'clearing';
       if (g.score > g.high) { /* live best display, persisted at game over */ }
       emit('clear', { rows: rows.slice(), cells: cells, points: pts, balls: balls, chain: g.chain, count: n });
-      if (leveled) emit('levelup', { level: g.level });
+      if (leveled) emit('levelup', { level: g.level, interval: g.gravityInterval(), prevInterval: prevInterval, speed: g.speedFactor() });
     }
 
     function finishClear() {
@@ -426,9 +441,12 @@
     }
     g.finishClear = finishClear;
 
-    g.gravityInterval = function () {
-      return Math.max(55, Math.round(800 * Math.pow(0.84, g.level - 1)));
+    // Guideline-style curve: 800 ms at level 1, ~100 ms by level 10, floored at 50 ms.
+    g.gravityInterval = function (level) {
+      var L = level || g.level;
+      return Math.max(GRAVITY_FLOOR, Math.round(GRAVITY_START * Math.pow(GRAVITY_RATIO, L - 1)));
     };
+    g.speedFactor = function (level) { return GRAVITY_START / g.gravityInterval(level); };
 
     function tickBounces(dt) {
       for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) {
@@ -522,8 +540,8 @@
   var MODE_INFO = {
     classic: 'Only the 7 classic tetrominoes. Switching is off.',
     balls: 'Only balls: singles, pairs, trios and triangles. They roll off edges like marbles.',
-    mixed: 'About 30% of pieces are balls, picked at random.',
-    alternating: 'Waves of 4 blocks, then 4 balls, repeating.'
+    mixed: 'About half of the pieces are balls, picked at random.',
+    alternating: 'Waves of 2 blocks, then 2 balls, repeating.'
   };
 
   function hexToRgb(hex) {
@@ -608,6 +626,16 @@
     else drawBlock(ctx, px, py, s, color, alpha);
   }
 
+  // Rolling-ball variant (level 5+): a white swirl ring so it reads as "rolls further".
+  function drawFarMark(ctx, px, py, s, alpha) {
+    ctx.save();
+    ctx.globalAlpha = 0.85 * (alpha == null ? 1 : alpha);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(1, s * 0.07); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(px + s / 2, py + s / 2, s * 0.3, -0.4, Math.PI * 0.9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(px + s / 2, py + s / 2, s * 0.3, Math.PI - 0.4, Math.PI * 1.9); ctx.stroke();
+    ctx.restore();
+  }
+
   function bounceParams(t) {
     // t: ms since landing, returns {dy (fraction of cell, negative = up), sx, sy}
     var p = Math.min(1, t / BOUNCE_TIME);
@@ -626,7 +654,7 @@
     var overlay = $('overlay'), overlayCard = $('overlayCard');
     var modeSel = $('mode'), modeInfo = $('modeInfo');
     var btnStart = $('btnStart'), btnPause = $('btnPause'), btnRestart = $('btnRestart'), btnSwitch = $('btnSwitch');
-    var elScore = $('score'), elLevel = $('level'), elLines = $('lines'), elHigh = $('high');
+    var elScore = $('score'), elLevel = $('level'), elLines = $('lines'), elHigh = $('high'), elSpeed = $('speed');
     var dotsEl = $('switchDots'), switchPanel = document.querySelector('.switch-panel'), switchHint = $('switchHint');
 
     var storage = {
@@ -891,8 +919,9 @@
         shake = Math.max(shake, 4);
       } else if (type === 'levelup') {
         levelFlash = 1;
-        floaters.push({ text: 'Level ' + d.level, sub: 'Faster!', x: bw / 2, y: bh * 0.35, life: 0, max: 1400, color: '#fde68a' });
-        bump(elLevel);
+        floaters.push({ text: 'LEVEL ' + d.level, sub: 'Speed up! ' + d.speed.toFixed(1) + '\u00d7 (' + d.interval + ' ms/row) \u00b7 +1 switch', x: bw / 2, y: bh * 0.35, life: 0, max: 1700, color: '#fde68a' });
+        flash = Math.max(flash, 0.35);
+        bump(elLevel); bump(elSpeed);
       } else if (type === 'switch') {
         var cells = game.pieceCells();
         cells.forEach(function (c) {
@@ -973,6 +1002,7 @@
               py += bp.dy * cell; sx = bp.sx; sy = bp.sy;
             }
             drawCell(ctx, 'ball', px, py, cell, c.color, 1, sx, sy);
+            if (c.far) drawFarMark(ctx, px, py, cell, 1);
           } else {
             drawCell(ctx, 'block', px, py, cell, c.color, 1);
           }
@@ -1015,6 +1045,7 @@
         var y = p.y + c[1];
         if (y < 0) return;
         drawCell(ctx, p.form, (p.x + c[0]) * cell, y * cell, cell, p.color, 1);
+        if (p.far && p.form === 'ball') drawFarMark(ctx, (p.x + c[0]) * cell, y * cell, cell, 1);
       });
     }
 
@@ -1104,6 +1135,7 @@
         var color = colorFor(d.shape, d.form);
         cells.forEach(function (c) {
           drawCell(nctx, d.form, ox + (c[0] - minX) * s, oy + (c[1] - minY) * s, s, color, big ? 1 : 0.6);
+          if (d.far && d.form === 'ball') drawFarMark(nctx, ox + (c[0] - minX) * s, oy + (c[1] - minY) * s, s, big ? 1 : 0.6);
         });
         y0 += sh;
       }
@@ -1116,6 +1148,7 @@
       if (force) last = {};
       setText(elScore, 'score', game.score.toLocaleString());
       setText(elLevel, 'level', String(game.level));
+      setText(elSpeed, 'speed', game.speedFactor().toFixed(1) + '\u00d7');
       setText(elLines, 'lines', String(game.lines));
       setText(elHigh, 'high', Math.max(game.high, game.score).toLocaleString());
       var sigSw = game.switches + '|' + game.mode + '|' + game.canSwitch() + '|' + game.linesToCharge();
