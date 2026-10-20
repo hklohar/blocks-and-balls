@@ -48,6 +48,45 @@
   ANIMALS.forEach(function (a) { ANIMAL_AT[a.sq] = a; });
   CREATURES.forEach(function (c) { CREATURE_AT[c.sq] = c; CREATURE_BY_ID[c.id] = c; });
 
+  // The slide-down hazard animal changes every game. Board positions (SNAKES)
+  // never change; only the character drawn from head to tail does.
+  var HAZARDS = [
+    { id: 'snake', name: 'Snake', plural: 'Snakes', emoji: '\u{1F40D}', sfx: 'Hiss!' },
+    { id: 'croc', name: 'Crocodile', plural: 'Crocodiles', emoji: '\u{1F40A}', sfx: 'Chomp!' },
+    { id: 'octopus', name: 'Octopus', plural: 'Octopuses', emoji: '\u{1F419}', sfx: 'Squish!' },
+    { id: 'dragon', name: 'Dragon', plural: 'Dragons', emoji: '\u{1F409}', sfx: 'Whoosh!' },
+    { id: 'eel', name: 'Glow Eel', plural: 'Glow Eels', emoji: '\u26A1', sfx: 'Zap!' },
+    { id: 'caterpillar', name: 'Caterpillar', plural: 'Caterpillars', emoji: '\u{1F41B}', sfx: 'Wiggle!' },
+    { id: 'giraffe', name: 'Giraffe', plural: 'Giraffes', emoji: '\u{1F992}', sfx: 'Wheee!' },
+    { id: 'elephant', name: 'Elephant', plural: 'Elephants', emoji: '\u{1F418}', sfx: 'Splash!' }
+  ];
+  var HAZARD_BY_ID = {};
+  HAZARDS.forEach(function (h) { HAZARD_BY_ID[h.id] = h; });
+  // pick a hazard that differs from `lastId` (never the same twice in a row)
+  function pickHazard(lastId, rnd) {
+    var pool = HAZARDS.filter(function (h) { return h.id !== lastId; });
+    return pool[Math.min(pool.length - 1, Math.floor((rnd || Math.random)() * pool.length))].id;
+  }
+
+  // Fun kid-friendly player names: adjective + animal, unique within a game.
+  var NAME_ADJ = ['Bouncy', 'Zippy', 'Sunny', 'Giggly', 'Fluffy', 'Sparkly', 'Wiggly', 'Jolly', 'Snappy', 'Breezy', 'Cosmic', 'Dizzy', 'Fuzzy', 'Happy', 'Peppy',
+    'Speedy', 'Twinkly', 'Bubbly', 'Cheery', 'Lucky', 'Silly', 'Sleepy', 'Mighty', 'Tiny', 'Brave', 'Clever', 'Swift', 'Merry', 'Rosy', 'Comfy'];
+  var NAME_ANIMAL = ['Otter', 'Panda', 'Koala', 'Penguin', 'Bunny', 'Kitten', 'Puppy', 'Fox', 'Hedgehog', 'Owl', 'Duckling', 'Lamb', 'Seal', 'Llama', 'Sloth',
+    'Turtle', 'Hamster', 'Piglet', 'Squirrel', 'Badger', 'Dolphin', 'Parrot', 'Beaver', 'Raccoon', 'Moose', 'Lemur', 'Gecko', 'Pony', 'Robin', 'Frog'];
+  var NAME_MAX = 18;
+  function randomName(taken, rnd) {
+    rnd = rnd || Math.random;
+    var lower = (taken || []).map(function (t) { return String(t).toLowerCase(); }), nm, tries = 0, words = {};
+    lower.forEach(function (t) { t.split(' ').forEach(function (w) { words[w] = 1; }); });
+    do { // prefer an adjective and an animal nobody else has this game
+      var ad = NAME_ADJ[Math.floor(rnd() * NAME_ADJ.length) % NAME_ADJ.length], an = NAME_ANIMAL[Math.floor(rnd() * NAME_ANIMAL.length) % NAME_ANIMAL.length];
+      nm = ad + ' ' + an;
+      var clash = lower.indexOf(nm.toLowerCase()) >= 0 || (tries < 100 && (words[ad.toLowerCase()] || words[an.toLowerCase()]));
+    } while (clash && ++tries < 300);
+    return nm;
+  }
+  function cleanName(t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim().slice(0, NAME_MAX); }
+
   var POINTS = { animal: 40, animalAgain: 10, creature: 150, ropeBase: 30, win: 300 };
   var T = { cpu: 850, spin: 2600, landed: 650, hop: 230, slide: 1300, climb: 1100, gap: 500 };
   var WHEEL_SEGMENTS = 10, SEG_DEG = 36;
@@ -85,6 +124,7 @@
   function createDoodle(opts) {
     opts = opts || {};
     var rng = opts.rng || Math.random;
+    var hazardRng = opts.hazardRng || Math.random; // separate stream: never shifts the spin sequence
     var storage = opts.storage || null;
     var g = {
       phase: 'idle', paused: false, speed: 1,
@@ -93,16 +133,26 @@
       path: [], pathIdx: 0, hopT: 0, hopFrom: 1,
       anim: null, perkUsed: false, extraTurn: false,
       collected: {}, log: [], winner: null, onEvent: null,
-      high: 0, bestCollection: 0, stats: null
+      high: 0, bestCollection: 0, stats: null, hazard: 'snake'
     };
     function emit(type, data) { if (g.onEvent) { try { g.onEvent(type, data || {}); } catch (e) { if (typeof console !== 'undefined') console.error(e); } } }
     function load(k) { if (!storage) return null; try { return storage.get(k); } catch (e) { return null; } }
     function save(k, v) { if (storage) { try { storage.set(k, v); } catch (e) { /* ignore */ } } }
     function loadInt(k) { var v = parseInt(load(k), 10); return isFinite(v) ? v : 0; }
-    function freshStats() { return { games: 0, wins: 0, cpuWins: 0, spins: 0, snakes: 0, ropes: 0, animals: 0, creatures: 0 }; }
+    function freshStats() { return { games: 0, wins: 0, cpuWins: 0, spins: 0, snakes: 0, ropes: 0, animals: 0, creatures: 0, byHazard: {} }; }
     g.high = loadInt('doodlewheel-high');
     g.bestCollection = loadInt('doodlewheel-best-collection');
     try { g.stats = Object.assign(freshStats(), JSON.parse(load('doodlewheel-stats') || '{}')); } catch (e) { g.stats = freshStats(); }
+    if (!g.stats.byHazard || typeof g.stats.byHazard !== 'object') g.stats.byHazard = {};
+    if (HAZARD_BY_ID[load('doodlewheel-hazard')]) g.hazard = load('doodlewheel-hazard');
+    g.hazardInfo = function () { return HAZARD_BY_ID[g.hazard]; };
+    g.setRng = function (fn) { rng = typeof fn === 'function' ? fn : Math.random; };
+    g.rename = function (id, name) {
+      var p = g.players[id], nm = cleanName(name);
+      if (!p || !nm) return false;
+      p.name = nm; emit('rename', { player: id, name: nm });
+      return true;
+    };
 
     function rint(n) { return Math.min(n - 1, Math.floor(rng() * n)); }
     function addLog(text) { g.log.push(text); if (g.log.length > 30) g.log.shift(); emit('log', { text: text }); }
@@ -111,10 +161,15 @@
     g.isHumanTurn = function () { var p = g.current(); return !!p && p.type === 'human' && g.phase === 'ready' && !g.paused; };
     g.isActive = function () { return g.phase !== 'idle' && g.phase !== 'over'; };
 
-    g.start = function (seats) {
+    g.start = function (seats, o) {
+      o = o || {};
       seats = (seats && seats.length ? seats : [{ type: 'human', name: 'You' }, { type: 'cpu', name: 'CPU' }]).slice(0, 4);
+      // a new hazard animal every game, never the same as the previous game
+      var prevHazard = HAZARD_BY_ID[load('doodlewheel-hazard')] ? load('doodlewheel-hazard') : g.hazard;
+      g.hazard = HAZARD_BY_ID[o.hazard] ? o.hazard : pickHazard(prevHazard, hazardRng);
+      save('doodlewheel-hazard', g.hazard);
       g.players = seats.map(function (s, i) {
-        return { id: i, type: s.type === 'cpu' ? 'cpu' : 'human', name: s.name || (s.type === 'cpu' ? 'CPU ' + (i + 1) : 'Player ' + (i + 1)),
+        return { id: i, seat: s.seat != null ? s.seat : i, type: s.type === 'cpu' ? 'cpu' : 'human', name: cleanName(s.name) || (s.type === 'cpu' ? 'CPU ' + (i + 1) : 'Player ' + (i + 1)),
           token: TOKENS[i], pos: 1, score: 0, friends: {}, creatures: [],
           stats: { spins: 0, snakes: 0, ropes: 0, animals: 0, creatures: 0, bounces: 0 } };
       });
@@ -185,6 +240,7 @@
       var st = g.stats;
       st.games++;
       if (p.type === 'human') st.wins++; else st.cpuWins++;
+      st.byHazard[g.hazard] = (st.byHazard[g.hazard] || 0) + humans.reduce(function (m, h) { return m + h.stats.snakes; }, 0);
       humans.forEach(function (h) { st.spins += h.stats.spins; st.snakes += h.stats.snakes; st.ropes += h.stats.ropes; st.animals += h.stats.animals; st.creatures += h.stats.creatures; });
       save('doodlewheel-stats', JSON.stringify(st));
       emit('win', { player: p.id, newRecord: newRecord, newBestCollection: newBestCollection, high: g.high, bestCollection: g.bestCollection });
@@ -197,10 +253,11 @@
       var p = g.current(), sq = p.pos;
       if (SNAKES[sq]) {
         p.stats.snakes++;
-        addLog(p.name + ' hit a snake: ' + sq + ' \u2192 ' + SNAKES[sq]);
+        var hz = HAZARD_BY_ID[g.hazard];
+        addLog(p.name + ' slid down the ' + hz.name + '! ' + sq + ' \u2192 ' + SNAKES[sq]);
         g.anim = { type: 'slide', from: sq, to: SNAKES[sq], t: 0, dur: T.slide };
         g.phase = 'sliding';
-        emit('snake', { player: p.id, from: sq, to: SNAKES[sq] });
+        emit('snake', { player: p.id, from: sq, to: SNAKES[sq], hazard: g.hazard });
         return;
       }
       if (ROPES[sq]) {
@@ -302,6 +359,8 @@
   var api = {
     createDoodle: createDoodle, squareToCell: squareToCell, cellToSquare: cellToSquare, computePath: computePath,
     wheelSegmentAt: wheelSegmentAt, wheelTargetAngle: wheelTargetAngle,
+    pickHazard: pickHazard, randomName: randomName, cleanName: cleanName,
+    HAZARDS: HAZARDS, NAME_ADJ: NAME_ADJ, NAME_ANIMAL: NAME_ANIMAL, NAME_MAX: NAME_MAX,
     SNAKES: SNAKES, ROPES: ROPES, ANIMALS: ANIMALS, CREATURES: CREATURES, TOKENS: TOKENS, POINTS: POINTS, TIMING: T,
     SIZE: SIZE, LAST: LAST, WHEEL_SEGMENTS: WHEEL_SEGMENTS
   };
@@ -519,19 +578,40 @@
     var overlay = $('dwOverlay'), overlayCard = $('dwOverlayCard');
     var spinBtn = $('dwSpin'), lastEl = $('dwLast'), turnEl = $('dwTurn'), playersEl = $('dwPlayers');
     var btnNew = $('dwNew'), btnRestart = $('dwRestart'), btnPause = $('dwPause'), btnSpeed = $('dwSpeed');
-    var trayEl = $('dwTray'), trayCount = $('dwTrayCount'), logEl = $('dwLog');
+    var trayEl = $('dwTray'), trayCount = $('dwTrayCount'), logEl = $('dwLog'), hazardEl = $('dwHazard');
 
     var storage = {
       get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
       set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } }
     };
     var G = createDoodle({ storage: storage });
+    var hazardSeen = !!storage.get('doodlewheel-hazard');
     root.doodle = G; // handy for debugging / automation
 
     var seats = null;
     try { seats = JSON.parse(storage.get('doodlewheel-players') || 'null'); } catch (e) { seats = null; }
     if (!Array.isArray(seats) || !seats.length) seats = [{ type: 'human' }, { type: 'cpu' }, { type: 'off' }, { type: 'off' }];
     while (seats.length < 4) seats.push({ type: 'off' });
+    seats = seats.slice(0, 4).map(function (st, i) {
+      var t = st && (st.type === 'cpu' || st.type === 'off') && !(i === 0 && st.type === 'off') ? st.type : 'human';
+      var nm = cleanName(st && st.name);
+      return { type: t, name: nm, custom: !!nm }; // custom = edited by the player, remembered
+    });
+    function saveSeats() {
+      storage.set('doodlewheel-players', JSON.stringify(seats.map(function (st) { return st.custom ? { type: st.type, name: st.name } : { type: st.type }; })));
+    }
+    // fresh random names for every seat the player hasn't renamed, unique within the game
+    function rollNames() {
+      var taken = seats.filter(function (st) { return st.custom; }).map(function (st) { return st.name; });
+      seats.forEach(function (st) { if (!st.custom) { st.name = randomName(taken); taken.push(st.name); } });
+    }
+    function rerollSeat(i) {
+      var taken = seats.filter(function (st, j) { return j !== i; }).map(function (st) { return st.name; });
+      taken.push(seats[i].name); // always a different name
+      seats[i].custom = false; seats[i].name = randomName(taken);
+      saveSeats();
+      return seats[i].name;
+    }
     var themeId = storage.get('doodlewheel-theme');
     if (!THEMES[themeId]) themeId = 'mint';
     var TH = THEMES[themeId];
@@ -733,6 +813,225 @@
       ctx.restore();
     }
 
+    // ---------- hazard animals (one per game, drawn head -> tail) ----------
+    var HZ_STYLE = {
+      snake: { amp: 1, trail: null },
+      croc: { amp: 0.65, trail: ['#7dd3fc', '#e0f2fe', '#38bdf8'], shake: 1.1, pal: [['#4ade80', '#14532d', '#d9f99d'], ['#22c55e', '#166534', '#fef08a'], ['#65a30d', '#1a2e05', '#ecfccb']] },
+      octopus: { amp: 1.05, trail: ['#4c1d95', '#6d28d9', '#1e1b4b'], shake: 0.6, pal: [['#c084fc', '#6b21a8', '#f5d0fe'], ['#fb7185', '#9f1239', '#ffe4e6'], ['#fb923c', '#9a3412', '#ffedd5']] },
+      dragon: { amp: 1.1, trail: ['#f97316', '#facc15', '#ef4444'], shake: 0.8, pal: [['#f87171', '#991b1b', '#fde68a'], ['#2dd4bf', '#115e59', '#fef08a'], ['#a78bfa', '#4c1d95', '#fde68a']] },
+      eel: { amp: 1.25, trail: ['#fef08a', '#a5f3fc', '#ffffff'], shake: 0.7, pal: [['#22d3ee', '#0e7490', '#ecfeff'], ['#a3e635', '#3f6212', '#f7fee7'], ['#f472b6', '#9d174d', '#fdf2f8']] },
+      caterpillar: { amp: 0.8, trail: ['#4ade80', '#86efac', '#16a34a'], shake: 0.5, pal: [['#84cc16', '#365314', '#facc15'], ['#60a5fa', '#1e3a8a', '#f9a8d4'], ['#fb923c', '#7c2d12', '#fde047']] },
+      giraffe: { amp: 0.35, trail: ['#fde047', '#fbbf24', '#ffffff'], shake: 0.5, pal: [['#fcd34d', '#92400e', '#b45309']] },
+      elephant: { amp: 0.55, trail: ['#60a5fa', '#bfdbfe', '#3b82f6'], shake: 0.7, pal: [['#a5b4c8', '#334155', '#f9a8d4'], ['#c4b5fd', '#4c1d95', '#fbcfe8'], ['#93c5fd', '#1e3a8a', '#fbcfe8']] }
+    };
+    function hazardPoints(head, tail, phase, amp) {
+      return snakePoints(head, tail, phase, amp * ((HZ_STYLE[G.hazard] || HZ_STYLE.snake).amp));
+    }
+    function segAngle(pts, i) { var a = pts[Math.min(pts.length - 1, i + 1)], b = pts[Math.max(0, i - 1)]; return Math.atan2(b.y - a.y, b.x - a.x); }
+    // tapered body: two passes (outline, then fill), widths w0 at head -> w1 at tail
+    function taper(pts, w0, w1, outline, fill, ow) {
+      var n = pts.length, i, pass;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (pass = 0; pass < 2; pass++) {
+        for (i = n - 1; i > 0; i--) {
+          var t = i / (n - 1), w = w0 + (w1 - w0) * t;
+          ctx.strokeStyle = pass ? fill : outline; ctx.lineWidth = pass ? w : w + (ow || 3);
+          ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y); ctx.lineTo(pts[i - 1].x, pts[i - 1].y); ctx.stroke();
+        }
+      }
+    }
+    function cheeks(x, y, dx, r) { circle(ctx, x - dx, y, r, 'rgba(244,114,182,0.65)'); circle(ctx, x + dx, y, r, 'rgba(244,114,182,0.65)'); }
+    function cuteEye(x, y, r) { circle(ctx, x, y, r, '#fff'); circle(ctx, x, y + r * 0.1, r * 0.62, '#1e1b2e'); circle(ctx, x - r * 0.22, y - r * 0.2, r * 0.25, '#fff'); }
+
+    function drawHazard(kind, head, tail, idx, now, active) {
+      if (kind === 'snake' || !HZ_STYLE[kind]) { drawSnake(head, tail, idx, now, active); return; }
+      var st = HZ_STYLE[kind], pal = st.pal[idx % st.pal.length];
+      var amp = active ? 1 + Math.sin(now * 0.03) * 0.5 : 1;
+      var pts = hazardPoints(head, tail, now * (active ? 0.012 : 0.0016) + idx, amp), n = pts.length, i, h = pts[0], ang = segAngle(pts, 1);
+      var tl = pts[n - 1];
+      ctx.save();
+      switch (kind) {
+        case 'croc': {
+          taper(pts, s * 0.36, s * 0.08, pal[1], pal[0]);
+          taper(pts.slice(0, n - 4), s * 0.13, s * 0.03, pal[0], pal[2], 0);
+          for (i = 4; i < n - 3; i += 3) { // back ridges
+            var a = segAngle(pts, i), w = s * (0.36 - 0.28 * i / n) * 0.5, nx = Math.cos(a + Math.PI / 2), ny = Math.sin(a + Math.PI / 2);
+            poly(ctx, [[pts[i].x + nx * w * 0.8 - Math.cos(a) * s * 0.05, pts[i].y + ny * w * 0.8 - Math.sin(a) * s * 0.05], [pts[i].x + nx * (w + s * 0.09), pts[i].y + ny * (w + s * 0.09)],
+              [pts[i].x + nx * w * 0.8 + Math.cos(a) * s * 0.05, pts[i].y + ny * w * 0.8 + Math.sin(a) * s * 0.05]], pal[1]);
+          }
+          var open = active ? Math.abs(Math.sin(now * 0.02)) * 0.55 : 0.08 + Math.sin(now * 0.003 + idx) * 0.05;
+          ctx.translate(h.x, h.y); ctx.rotate(ang);
+          [-1, 1].forEach(function (k) { // lower/upper jaw with teeth
+            ctx.save(); ctx.rotate(k * open / 2);
+            ctx.beginPath(); ctx.moveTo(-s * 0.05, 0); ctx.lineTo(s * 0.44, k * s * 0.02); ctx.quadraticCurveTo(s * 0.5, k * s * 0.1, s * 0.4, k * s * 0.13); ctx.lineTo(-s * 0.05, k * s * 0.16); ctx.closePath();
+            ctx.fillStyle = pal[0]; ctx.fill(); ctx.strokeStyle = pal[1]; ctx.lineWidth = 1.5; ctx.stroke();
+            ctx.fillStyle = '#fff';
+            for (var q = 0; q < 4; q++) { var tx = s * (0.08 + q * 0.09); ctx.beginPath(); ctx.moveTo(tx, k * s * 0.015); ctx.lineTo(tx + s * 0.03, -k * s * 0.05); ctx.lineTo(tx + s * 0.06, k * s * 0.015); ctx.fill(); }
+            ctx.restore();
+          });
+          circle(ctx, -s * 0.06, 0, s * 0.2, pal[0]);
+          [-1, 1].forEach(function (k) { circle(ctx, -s * 0.06, k * s * 0.13, s * 0.1, pal[1]); cuteEye(-s * 0.06, k * s * 0.13, s * 0.08); });
+          circle(ctx, s * 0.42, -s * 0.04, s * 0.02, pal[1]); circle(ctx, s * 0.42, s * 0.04, s * 0.02, pal[1]);
+          break;
+        }
+        case 'octopus': {
+          taper(pts, s * 0.3, s * 0.07, pal[1], pal[0]);
+          for (i = 3; i < n - 2; i += 3) { // suckers on one side
+            var a2 = segAngle(pts, i), w2 = s * (0.3 - 0.23 * i / n) * 0.3, nx2 = Math.cos(a2 + Math.PI / 2), ny2 = Math.sin(a2 + Math.PI / 2);
+            circle(ctx, pts[i].x + nx2 * w2, pts[i].y + ny2 * w2, Math.max(1.2, w2 * 0.75), pal[1]);
+            circle(ctx, pts[i].x + nx2 * w2, pts[i].y + ny2 * w2, Math.max(0.8, w2 * 0.5), pal[2]);
+          }
+          ctx.beginPath(); ctx.arc(tl.x + s * 0.06, tl.y, s * 0.06, Math.PI, Math.PI * 2.6); ctx.strokeStyle = pal[0]; ctx.lineWidth = s * 0.06; ctx.stroke();
+          var sq = active ? 1 + Math.sin(now * 0.025) * 0.12 : 1 + Math.sin(now * 0.004 + idx) * 0.04;
+          ctx.translate(h.x, h.y - s * 0.06); ctx.scale(1 / sq, sq);
+          for (var m = -2; m <= 2; m++) { if (!m) continue; ctx.beginPath(); ctx.moveTo(m * s * 0.08, s * 0.12); ctx.quadraticCurveTo(m * s * 0.16, s * 0.28, m * s * 0.2 + Math.sin(now * 0.006 + m) * s * 0.04, s * 0.3); ctx.strokeStyle = pal[0]; ctx.lineWidth = s * 0.07; ctx.stroke(); }
+          ellipse(ctx, 0, 0, s * 0.32, s * 0.3, 0, pal[1]); ellipse(ctx, 0, -s * 0.01, s * 0.29, s * 0.27, 0, pal[0]);
+          ellipse(ctx, -s * 0.1, -s * 0.14, s * 0.08, s * 0.05, -0.5, 'rgba(255,255,255,0.45)');
+          cuteEye(-s * 0.11, s * 0.02, s * 0.075); cuteEye(s * 0.11, s * 0.02, s * 0.075);
+          cheeks(0, s * 0.12, s * 0.18, s * 0.04); smile(ctx, 0, s * 0.1, s * 0.05);
+          break;
+        }
+        case 'dragon': {
+          var wb = pts[6], wa = segAngle(pts, 6), flap = Math.sin(now * (active ? 0.04 : 0.006) + idx) * 0.45;
+          [-1, 1].forEach(function (k) { // little wings
+            ctx.save(); ctx.translate(wb.x, wb.y); ctx.rotate(wa + k * (Math.PI / 2 + flap));
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(s * 0.42, -s * 0.12);
+            ctx.quadraticCurveTo(s * 0.36, s * 0.02, s * 0.4, s * 0.1); ctx.quadraticCurveTo(s * 0.25, s * 0.06, s * 0.22, s * 0.16); ctx.quadraticCurveTo(s * 0.12, s * 0.06, 0, s * 0.08); ctx.closePath();
+            ctx.fillStyle = pal[2]; ctx.fill(); ctx.strokeStyle = pal[1]; ctx.lineWidth = 1.5; ctx.stroke(); ctx.restore();
+          });
+          taper(pts, s * 0.3, s * 0.08, pal[1], pal[0]);
+          for (i = 4; i < n - 3; i += 3) {
+            var a3 = segAngle(pts, i), w3 = s * (0.3 - 0.22 * i / n) * 0.5, nx3 = Math.cos(a3 - Math.PI / 2), ny3 = Math.sin(a3 - Math.PI / 2);
+            poly(ctx, [[pts[i].x + nx3 * w3 - Math.cos(a3) * s * 0.06, pts[i].y + ny3 * w3 - Math.sin(a3) * s * 0.06], [pts[i].x + nx3 * (w3 + s * 0.1), pts[i].y + ny3 * (w3 + s * 0.1)],
+              [pts[i].x + nx3 * w3 + Math.cos(a3) * s * 0.06, pts[i].y + ny3 * w3 + Math.sin(a3) * s * 0.06]], pal[2], pal[1], 1);
+          }
+          var ta = segAngle(pts, n - 2);
+          ctx.save(); ctx.translate(tl.x, tl.y); ctx.rotate(ta + Math.PI); poly(ctx, [[0, 0], [s * 0.16, -s * 0.1], [s * 0.24, 0], [s * 0.16, s * 0.1]], pal[2], pal[1], 1.5); ctx.restore();
+          ctx.translate(h.x, h.y); ctx.rotate(ang);
+          if (active && Math.floor(now / 160) % 2 === 0) flame(ctx, s * 0.5, 0, s * 0.12, now);
+          [-1, 1].forEach(function (k) { poly(ctx, [[-s * 0.12, k * s * 0.1], [-s * 0.34, k * s * 0.22], [-s * 0.05, k * s * 0.18]], '#fde68a', pal[1], 1.2); });
+          ellipse(ctx, s * 0.02, 0, s * 0.27, s * 0.22, 0, pal[1]); ellipse(ctx, s * 0.02, 0, s * 0.245, s * 0.195, 0, pal[0]);
+          ellipse(ctx, s * 0.22, 0, s * 0.13, s * 0.12, 0, pal[0]);
+          circle(ctx, s * 0.3, -s * 0.05, s * 0.022, pal[1]); circle(ctx, s * 0.3, s * 0.05, s * 0.022, pal[1]);
+          cuteEye(-s * 0.02, -s * 0.1, s * 0.065); cuteEye(-s * 0.02, s * 0.1, s * 0.065);
+          break;
+        }
+        case 'eel': {
+          var glow = active ? 0.75 + Math.sin(now * 0.03) * 0.25 : 0.5 + Math.sin(now * 0.003 + idx) * 0.15;
+          ctx.save(); ctx.shadowColor = pal[0]; ctx.shadowBlur = s * 0.6 * glow; ctx.globalAlpha = 0.35 + glow * 0.25;
+          ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); for (i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y);
+          ctx.strokeStyle = pal[2]; ctx.lineWidth = s * 0.42; ctx.lineCap = 'round'; ctx.stroke(); ctx.restore();
+          // frilly fin ribbon along the back
+          var outer = [], inner = [];
+          for (i = 2; i < n - 1; i++) {
+            var a4 = segAngle(pts, i), w4 = s * (0.27 - 0.21 * i / n) * 0.5, fw = s * (0.07 + 0.04 * Math.abs(Math.sin(i * 0.9 + now * (active ? 0.02 : 0.004))));
+            var ux = Math.cos(a4 - Math.PI / 2), uy = Math.sin(a4 - Math.PI / 2);
+            inner.push([pts[i].x + ux * w4 * 0.6, pts[i].y + uy * w4 * 0.6]); outer.push([pts[i].x + ux * (w4 + fw), pts[i].y + uy * (w4 + fw)]);
+          }
+          poly(ctx, outer.concat(inner.reverse()), pal[2], pal[1], 1.2);
+          taper(pts, s * 0.27, s * 0.06, pal[1], pal[0]);
+          ctx.beginPath(); // lightning zig-zag stripe
+          for (i = 2; i < n - 2; i += 2) { var a5e = segAngle(pts, i), z = (i / 2) % 2 ? 1 : -1, wz = s * (0.27 - 0.21 * i / n) * 0.22; ctx.lineTo(pts[i].x + Math.cos(a5e + Math.PI / 2) * wz * z, pts[i].y + Math.sin(a5e + Math.PI / 2) * wz * z); }
+          ctx.strokeStyle = '#fde047'; ctx.lineWidth = Math.max(1.2, s * 0.045); ctx.lineJoin = 'miter'; ctx.stroke(); ctx.lineJoin = 'round';
+          if (active || Math.floor(now / 700 + idx) % 5 === 0) for (i = 0; i < (active ? 3 : 1); i++) { var bp = pts[(Math.floor(now / 90) * 7 + i * 13 + idx * 5) % n]; bolt(ctx, bp.x, bp.y - s * 0.2, s * 0.22, (i - 1) * 0.5, '#fde047'); }
+          ctx.translate(h.x, h.y); ctx.rotate(ang);
+          [-1, 1].forEach(function (k) { ellipse(ctx, -s * 0.12, k * s * 0.17, s * 0.1, s * 0.05, k * 0.6, pal[2]); });
+          ellipse(ctx, 0, 0, s * 0.27, s * 0.19, 0, pal[1]); ellipse(ctx, 0, 0, s * 0.245, s * 0.165, 0, pal[0]);
+          ellipse(ctx, s * 0.14, 0, s * 0.11, s * 0.12, 0, pal[0]);
+          cuteEye(s * 0.02, -s * 0.08, s * 0.075); cuteEye(s * 0.02, s * 0.08, s * 0.075);
+          ellipse(ctx, s * 0.22, 0, s * 0.035, s * 0.05, 0, pal[1]);
+          break;
+        }
+        case 'caterpillar': {
+          for (i = n - 1; i > 0; i -= 3) {
+            var r5 = s * (0.15 + 0.06 * (1 - i / n)) * (active ? 1 + Math.sin(now * 0.03 + i * 0.5) * 0.15 : 1);
+            var a5 = segAngle(pts, i), up = active ? Math.abs(Math.sin(now * 0.02 + i * 0.3)) * s * 0.06 : 0;
+            var cx5 = pts[i].x + Math.cos(a5 - Math.PI / 2) * up, cy5 = pts[i].y + Math.sin(a5 - Math.PI / 2) * up;
+            [-1, 1].forEach(function (k) { circle(ctx, cx5 + Math.cos(a5 + k * Math.PI / 2) * r5 * 0.95, cy5 + Math.sin(a5 + k * Math.PI / 2) * r5 * 0.95, Math.max(1, r5 * 0.22), pal[1]); });
+            circle(ctx, cx5, cy5, r5 + 1.5, pal[1]); circle(ctx, cx5, cy5, r5, (i / 3) % 2 ? pal[0] : shade(pal[0]));
+            circle(ctx, cx5, cy5 - r5 * 0.3, Math.max(1, r5 * 0.22), pal[2]);
+          }
+          ctx.translate(h.x, h.y);
+          var bob = Math.sin(now * (active ? 0.03 : 0.005) + idx) * s * 0.03;
+          [-1, 1].forEach(function (k) {
+            ctx.beginPath(); ctx.moveTo(k * s * 0.08, -s * 0.16); ctx.quadraticCurveTo(k * s * 0.12, -s * 0.34, k * s * 0.2, -s * 0.36 + bob);
+            ctx.strokeStyle = pal[1]; ctx.lineWidth = Math.max(1.2, s * 0.035); ctx.stroke(); circle(ctx, k * s * 0.2, -s * 0.36 + bob, s * 0.045, pal[2]);
+          });
+          circle(ctx, 0, 0, s * 0.26, pal[1]); circle(ctx, 0, 0, s * 0.235, pal[0]);
+          cuteEye(-s * 0.09, -s * 0.03, s * 0.07); cuteEye(s * 0.09, -s * 0.03, s * 0.07);
+          cheeks(0, s * 0.08, s * 0.15, s * 0.04); smile(ctx, 0, s * 0.06, s * 0.06);
+          break;
+        }
+        case 'giraffe': {
+          var sway = active ? Math.sin(now * 0.02) * 0.25 : Math.sin(now * 0.002 + idx) * 0.06;
+          ellipse(ctx, tl.x, tl.y, s * 0.24, s * 0.17, 0, pal[1]); ellipse(ctx, tl.x, tl.y, s * 0.22, s * 0.15, 0, pal[0]);
+          taper(pts, s * 0.2, s * 0.24, pal[1], pal[0]);
+          for (i = 2; i < n - 2; i += 2) { // mane
+            var a6 = segAngle(pts, i), w6 = s * 0.11;
+            ctx.strokeStyle = pal[2]; ctx.lineWidth = Math.max(1.5, s * 0.05);
+            ctx.beginPath(); ctx.moveTo(pts[i].x + Math.cos(a6 - Math.PI / 2) * w6, pts[i].y + Math.sin(a6 - Math.PI / 2) * w6);
+            ctx.lineTo(pts[i].x + Math.cos(a6 - Math.PI / 2) * (w6 + s * 0.06), pts[i].y + Math.sin(a6 - Math.PI / 2) * (w6 + s * 0.06)); ctx.stroke();
+          }
+          for (i = 4; i < n - 1; i += 5) { var a7 = segAngle(pts, i), o7 = (i % 2 ? 1 : -1) * s * 0.04; ellipse(ctx, pts[i].x + Math.cos(a7 + Math.PI / 2) * o7, pts[i].y + Math.sin(a7 + Math.PI / 2) * o7, s * 0.07, s * 0.05, a7, pal[2]); }
+          ellipse(ctx, tl.x - s * 0.08, tl.y, s * 0.05, s * 0.04, 0, pal[2]); ellipse(ctx, tl.x + s * 0.1, tl.y - s * 0.03, s * 0.045, s * 0.035, 0, pal[2]);
+          ctx.translate(h.x, h.y - s * 0.04); ctx.rotate(sway);
+          [-1, 1].forEach(function (k) {
+            ctx.strokeStyle = pal[1]; ctx.lineWidth = Math.max(1.5, s * 0.05); ctx.beginPath(); ctx.moveTo(k * s * 0.07, -s * 0.16); ctx.lineTo(k * s * 0.09, -s * 0.32); ctx.stroke();
+            circle(ctx, k * s * 0.09, -s * 0.33, s * 0.05, pal[2]);
+            ellipse(ctx, k * s * 0.22, -s * 0.12, s * 0.09, s * 0.045, k * 0.5, pal[1]); ellipse(ctx, k * s * 0.22, -s * 0.12, s * 0.07, s * 0.03, k * 0.5, '#fde68a');
+          });
+          ellipse(ctx, 0, 0, s * 0.2, s * 0.23, 0, pal[1]); ellipse(ctx, 0, 0, s * 0.18, s * 0.21, 0, pal[0]);
+          ellipse(ctx, 0, s * 0.12, s * 0.14, s * 0.1, 0, '#fef3c7');
+          circle(ctx, -s * 0.05, s * 0.12, s * 0.018, pal[1]); circle(ctx, s * 0.05, s * 0.12, s * 0.018, pal[1]);
+          cuteEye(-s * 0.08, -s * 0.05, s * 0.06); cuteEye(s * 0.08, -s * 0.05, s * 0.06);
+          ellipse(ctx, -s * 0.06, -s * 0.15, s * 0.04, s * 0.03, 0, pal[2]);
+          break;
+        }
+        case 'elephant': {
+          taper(pts, s * 0.3, s * 0.11, pal[1], pal[0]);
+          ctx.strokeStyle = pal[1]; ctx.lineWidth = Math.max(1, s * 0.025);
+          for (i = 4; i < n - 2; i += 3) { // trunk wrinkles
+            var a8 = segAngle(pts, i), w8 = s * (0.3 - 0.19 * i / n) * 0.42, px8 = Math.cos(a8 + Math.PI / 2), py8 = Math.sin(a8 + Math.PI / 2);
+            ctx.beginPath(); ctx.moveTo(pts[i].x + px8 * w8, pts[i].y + py8 * w8); ctx.lineTo(pts[i].x - px8 * w8, pts[i].y - py8 * w8); ctx.stroke();
+          }
+          var ta8 = segAngle(pts, n - 2);
+          ctx.save(); ctx.translate(tl.x, tl.y); ctx.rotate(ta8 + Math.PI);
+          ellipse(ctx, s * 0.02, 0, s * 0.07, s * 0.09, 0, pal[1]); ellipse(ctx, s * 0.02, 0, s * 0.055, s * 0.075, 0, pal[0]);
+          ellipse(ctx, s * 0.05, 0, s * 0.02, s * 0.035, 0, pal[1]); ctx.restore();
+          ctx.translate(h.x, h.y - s * 0.05);
+          var ear = Math.sin(now * (active ? 0.03 : 0.004) + idx) * 0.15;
+          [-1, 1].forEach(function (k) {
+            ctx.save(); ctx.translate(k * s * 0.22, -s * 0.02); ctx.rotate(k * ear);
+            ellipse(ctx, 0, 0, s * 0.17, s * 0.2, 0, pal[1]); ellipse(ctx, 0, 0, s * 0.15, s * 0.18, 0, pal[0]); ellipse(ctx, k * s * 0.02, 0, s * 0.09, s * 0.12, 0, pal[2]); ctx.restore();
+          });
+          circle(ctx, 0, 0, s * 0.24, pal[1]); circle(ctx, 0, 0, s * 0.22, pal[0]);
+          ellipse(ctx, -s * 0.07, -s * 0.12, s * 0.06, s * 0.035, -0.4, 'rgba(255,255,255,0.4)');
+          cuteEye(-s * 0.09, -s * 0.02, s * 0.065); cuteEye(s * 0.09, -s * 0.02, s * 0.065);
+          cheeks(0, s * 0.08, s * 0.15, s * 0.04);
+          poly(ctx, [[-s * 0.1, s * 0.14], [-s * 0.14, s * 0.24], [-s * 0.06, s * 0.17]], '#fffbeb', pal[1], 1); poly(ctx, [[s * 0.1, s * 0.14], [s * 0.14, s * 0.24], [s * 0.06, s * 0.17]], '#fffbeb', pal[1], 1);
+          break;
+        }
+      }
+      ctx.restore();
+    }
+    function shade(hex) { // slightly darker variant of a #rrggbb colour
+      var v = parseInt(hex.slice(1), 16), r = (v >> 16) & 255, g2 = (v >> 8) & 255, b = v & 255;
+      return 'rgb(' + Math.round(r * 0.85) + ',' + Math.round(g2 * 0.85) + ',' + Math.round(b * 0.85) + ')';
+    }
+    // where the elephant's trunk ends etc: used for trail particles while sliding
+    function slideTrail(dt, q) {
+      var st = HZ_STYLE[G.hazard];
+      if (!st || !st.trail || !q) return;
+      if (Math.random() < Math.min(1, dt / 40)) {
+        var kind = G.hazard === 'caterpillar' ? 'leaf' : (G.hazard === 'octopus' || G.hazard === 'elephant' || G.hazard === 'croc') ? 'drop' : 'dot';
+        burst(q.x, q.y, st.trail, 3, kind);
+      }
+      if (G.hazard === 'elephant' && G.anim) { // water spray from the trunk tip
+        var tp = center(G.anim.to);
+        if (Math.random() < dt / 30) particles.push({ x: tp.x, y: tp.y, vx: (Math.random() - 0.5) * 0.08 * s, vy: -(0.08 + Math.random() * 0.06) * s, life: 1, decay: 0.002, color: st.trail[Math.floor(Math.random() * 3)], size: s * 0.07, kind: 'drop' });
+      }
+    }
+
     function emojiSprite(emoji) {
       var key = emoji + '@' + s;
       if (emojiCache[key]) return emojiCache[key];
@@ -776,7 +1075,7 @@
         }
         if ((G.phase === 'sliding' || G.phase === 'climbing') && G.anim) {
           var e = G.anim.t / G.anim.dur, pts;
-          if (G.anim.type === 'slide') { var hd = G.anim.from, nw = performance.now(); pts = snakePoints(hd, G.anim.to, nw * 0.012 + snakeIndex(hd), 1 + Math.sin(nw * 0.03) * 0.5); }
+          if (G.anim.type === 'slide') { var hd = G.anim.from, nw = performance.now(); pts = hazardPoints(hd, G.anim.to, nw * 0.012 + snakeIndex(hd), 1 + Math.sin(nw * 0.03) * 0.5); }
           else pts = ropePoints(G.anim.from, G.anim.to, 0);
           var t = G.anim.type === 'slide' ? e * e * (3 - 2 * e) : 1 - (e * e * (3 - 2 * e));
           var q = along(pts, t);
@@ -824,7 +1123,7 @@
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.font = '800 ' + Math.round(R * 0.15) + 'px ui-sans-serif, system-ui, sans-serif';
       ctx.fillStyle = p.token.color;
-      ctx.fillText(p.name + (p.name === 'You' ? ' spin!' : ' spins!'), cx, cy - R * 1.3);
+      ctx.fillText(p.name + ' spins!', cx, cy - R * 1.3);
       ctx.save(); ctx.translate(cx, cy);
       ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = R * 0.15;
       circle(ctx, 0, 0, R * 1.07, '#1e1b4b'); ctx.shadowBlur = 0;
@@ -885,6 +1184,8 @@
         if (p.life <= 0) { particles.splice(i, 1); continue; }
         ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
         if (p.kind === 'heart') drawHeart(p.x, p.y, p.size * 1.4);
+        else if (p.kind === 'drop') { ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 0.6, 0, TAU); ctx.fill(); }
+        else if (p.kind === 'leaf') ellipse(ctx, p.x, p.y, p.size, p.size * 0.5, p.life * 5, p.color);
         else { ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.life * 6); ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size); ctx.restore(); }
       }
       ctx.globalAlpha = 1;
@@ -921,8 +1222,9 @@
       drawItems(now);
       Object.keys(ROPES).forEach(function (b) { drawRopeLine(+b, ROPES[b], now); });
       var sliding = G.phase === 'sliding' && G.anim ? G.anim.from : -1;
-      SNAKE_KEYS.forEach(function (h, i) { drawSnake(h, SNAKES[h], i, now, h === sliding); });
+      SNAKE_KEYS.forEach(function (h, i) { drawHazard(G.hazard, h, SNAKES[h], i, now, h === sliding); });
       var cur = G.current();
+      if (cur && sliding > 0 && dt > 0) slideTrail(dt, tokenPos(cur, G.turn));
       G.players.forEach(function (p, i) { if (p !== cur) { var q = tokenPos(p, i); drawToken(p, q.x, q.y, s * 0.24, false, now); } });
       if (cur) { var q = tokenPos(cur, G.turn); drawToken(cur, q.x, q.y, s * (q.moving ? 0.3 : 0.27), G.isActive(), now); }
       drawEffects(dt);
@@ -959,12 +1261,54 @@
       if (popId && slots[popId]) { var el = slots[popId].el; el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
     }
     function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+    var renaming = -1;
     function syncPlayers() {
+      if (renaming >= 0) { // don't wipe the name being typed; just refresh the numbers
+        playersEl.querySelectorAll('.dw-pl').forEach(function (el, i) {
+          var p = G.players[i]; if (!p) return;
+          el.querySelector('.dw-sq').textContent = p.pos; el.querySelector('.dw-pts').textContent = p.score;
+          el.classList.toggle('on', i === G.turn && G.isActive());
+        });
+        return;
+      }
       playersEl.innerHTML = G.players.map(function (p, i) {
-        return '<div class="dw-pl' + (i === G.turn && G.isActive() ? ' on' : '') + (G.winner === i ? ' won' : '') + '" style="--tc:' + p.token.color + '">' +
+        return '<div class="dw-pl' + (i === G.turn && G.isActive() ? ' on' : '') + (G.winner === i ? ' won' : '') + '" style="--tc:' + p.token.color + '" data-pl="' + i + '" role="button" tabindex="0" title="Tap to rename">' +
           '<i class="dw-dot"></i><b>' + esc(p.name) + '</b><span class="dw-sq">' + p.pos + '</span><span class="dw-pts">' + p.score + '</span></div>';
       }).join('');
     }
+    function startRename(i) {
+      var p = G.players[i], el = playersEl.querySelector('.dw-pl[data-pl="' + i + '"]');
+      if (!p || !el || renaming >= 0) return;
+      renaming = i;
+      var b = el.querySelector('b'), inp = document.createElement('input');
+      inp.className = 'dw-pl-name'; inp.type = 'text'; inp.value = p.name; inp.maxLength = NAME_MAX;
+      inp.setAttribute('aria-label', 'Rename ' + p.name); inp.autocomplete = 'off'; inp.spellcheck = false;
+      b.replaceWith(inp); inp.focus(); inp.select();
+      var done = false;
+      function finish(ok) {
+        if (done) return; done = true;
+        var nm = cleanName(inp.value);
+        renaming = -1;
+        if (ok && nm && nm !== p.name) {
+          G.rename(i, nm);
+          var st = seats[p.seat]; if (st) { st.name = nm; st.custom = true; saveSeats(); }
+        }
+        syncPlayers(); syncUI(true);
+      }
+      inp.addEventListener('keydown', function (e) {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      });
+      inp.addEventListener('blur', function () { finish(true); });
+    }
+    playersEl.addEventListener('click', function (e) {
+      if (e.target.closest('input')) return;
+      var el = e.target.closest('.dw-pl'); if (el) startRename(+el.dataset.pl);
+    });
+    playersEl.addEventListener('keydown', function (e) {
+      var el = e.target.closest && e.target.closest('.dw-pl');
+      if (el && e.target === el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.stopPropagation(); startRename(+el.dataset.pl); }
+    });
     function syncLog() {
       logEl.innerHTML = G.log.slice(-6).reverse().map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('');
     }
@@ -972,60 +1316,103 @@
     // ---------- overlays ----------
     function showOverlay(html) { overlayCard.innerHTML = html; overlay.classList.add('show'); }
     function hideOverlay() { overlay.classList.remove('show'); }
-    function setupOverlay() {
+    var overlayMode = 'setup';
+    function setupOverlay(fresh) {
+      if (fresh) rollNames();
+      overlayMode = 'setup';
       var rows = seats.map(function (st, i) {
         var opts = (i === 0 ? ['human', 'cpu'] : ['human', 'cpu', 'off']).map(function (t) {
           return '<button type="button" class="seg' + (st.type === t ? ' on' : '') + '" data-seat="' + i + '" data-type="' + t + '">' + { human: 'Human', cpu: 'CPU', off: 'Off' }[t] + '</button>';
         }).join('');
-        return '<div class="dw-seat" style="--tc:' + TOKENS[i].color + '"><i class="dw-dot"></i><span>Player ' + (i + 1) + '</span><div class="segs">' + opts + '</div></div>';
+        return '<div class="dw-seat' + (st.type === 'off' ? ' off' : '') + '" style="--tc:' + TOKENS[i].color + '"><i class="dw-dot"></i>' +
+          '<input class="dw-name" type="text" data-name="' + i + '" value="' + esc(st.name) + '" maxlength="' + NAME_MAX + '" autocomplete="off" spellcheck="false" aria-label="Player ' + (i + 1) + ' name">' +
+          '<button type="button" class="dw-reroll" data-reroll="' + i + '" title="New random name" aria-label="New random name for player ' + (i + 1) + '">\u{1F504}</button>' +
+          '<div class="segs">' + opts + '</div></div>';
       }).join('');
       var st = G.stats;
       showOverlay('<h2>Doodle Wheel</h2>' +
-        '<p>Snakes and ladders, doodle style. Spin the <b>1\u201310 wheel</b> to move, climb <b>ropes</b>, dodge <b>snakes</b>, befriend animals and catch creatures on 70\u201399. Land on <b>exactly 100</b> to win.</p>' +
+        '<p>Snakes and ladders, doodle style. Spin the <b>1\u201310 wheel</b> to move, climb <b>ropes</b>, dodge a <b>new slide-down animal</b> every game, befriend animals and catch creatures on 70\u201399. Land on <b>exactly 100</b> to win.</p>' +
         '<div class="dw-seats">' + rows + '</div>' +
         '<p class="dw-small">Best ' + G.high + ' pts \u00b7 best collection ' + G.bestCollection + '/8 \u00b7 ' + st.wins + ' wins in ' + st.games + ' games</p>' +
         '<button type="button" class="primary" data-ov="start">Start game</button>');
     }
-    function pauseOverlay() { showOverlay('<h2>Paused</h2><p>Press <kbd>P</kbd> or tap Resume.</p><button type="button" class="primary" data-ov="resume">Resume</button>'); }
+    function pauseOverlay() { overlayMode = 'pause'; showOverlay('<h2>Paused</h2><p>Press <kbd>P</kbd> or tap Resume.</p><button type="button" class="primary" data-ov="resume">Resume</button>'); }
     function winOverlay(d) {
-      var w = G.players[d.player];
+      var w = G.players[d.player], hz = G.hazardInfo();
+      overlayMode = 'win';
       var rowsH = G.players.map(function (p) {
         var chips = p.creatures.map(function (k) { return '<img alt="' + CREATURE_BY_ID[k].name + '" title="' + CREATURE_BY_ID[k].name + '" src="' + creatureImg(k) + '">'; }).join('');
         return '<tr' + (p === w ? ' class="win"' : '') + ' style="--tc:' + p.token.color + '"><td><i class="dw-dot"></i>' + esc(p.name) + '</td><td>' + p.score + '</td><td>' + p.stats.spins + '</td><td>' + p.stats.snakes + '</td><td>' + p.stats.ropes + '</td><td>' + p.stats.animals + '</td><td class="cr">' + (chips || p.creatures.length) + '</td></tr>';
       }).join('');
-      showOverlay('<h2>\u{1F3C6} ' + esc(w.name) + (w.name === 'You' ? ' win!' : ' wins!') + '</h2>' +
+      var hits = G.players.reduce(function (m, p) { return m + p.stats.snakes; }, 0);
+      showOverlay('<h2>\u{1F3C6} ' + esc(w.name) + ' wins!</h2>' +
         '<p>Landed exactly on 100 after ' + w.stats.spins + ' spins.</p>' +
-        '<table class="dw-table"><thead><tr><th></th><th>Pts</th><th>Spins</th><th>\u{1F40D}</th><th>\u{1FA62}</th><th>\u{1F43E}</th><th>Creatures</th></tr></thead><tbody>' + rowsH + '</tbody></table>' +
+        '<p class="dw-small dw-win-hz">This round: ' + hz.emoji + ' ' + hz.name + ' \u00b7 ' + hz.plural + ' hit: ' + hits + '</p>' +
+        '<table class="dw-table"><thead><tr><th></th><th>Pts</th><th>Spins</th><th title="' + hz.plural + ' hit">' + hz.emoji + '</th><th>\u{1FA62}</th><th>\u{1F43E}</th><th>Creatures</th></tr></thead><tbody>' + rowsH + '</tbody></table>' +
         (d.newRecord ? '<p class="record">New high score: ' + d.high + '!</p>' : '<p>Best score: ' + d.high + '</p>') +
         '<p class="dw-small">Best collection: ' + d.bestCollection + '/8' + (d.newBestCollection ? ' <span class="record">new best!</span>' : '') + '</p>' +
         '<div class="dw-ov-btns"><button type="button" class="primary" data-ov="again">Play again</button><button type="button" data-ov="setup">New game</button></div>');
     }
+    // name inputs on the setup screen: typing renames the seat and is remembered
+    overlay.addEventListener('input', function (e) {
+      var t = e.target;
+      if (!t.dataset || t.dataset.name == null) return;
+      var st = seats[+t.dataset.name], nm = cleanName(t.value);
+      if (nm) { st.name = nm; st.custom = true; } else st.custom = false;
+      saveSeats();
+    });
+    overlay.addEventListener('change', function (e) {
+      var t = e.target;
+      if (!t.dataset || t.dataset.name == null) return;
+      if (!cleanName(t.value)) t.value = rerollSeat(+t.dataset.name); // never leave a blank name
+    });
+    overlay.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && e.target.dataset && e.target.dataset.name != null) { e.preventDefault(); e.target.blur(); }
+    });
     overlay.addEventListener('click', function (e) {
       var b = e.target.closest('button');
       if (!b) return;
       if (b.dataset.seat != null) {
         seats[+b.dataset.seat].type = b.dataset.type;
-        storage.set('doodlewheel-players', JSON.stringify(seats));
-        setupOverlay(); return;
+        saveSeats();
+        setupOverlay(false); return;
+      }
+      if (b.dataset.reroll != null) {
+        var i = +b.dataset.reroll, inp = overlayCard.querySelector('input[data-name="' + i + '"]');
+        var nm = rerollSeat(i);
+        if (inp) inp.value = nm;
+        b.classList.remove('spin'); void b.offsetWidth; b.classList.add('spin');
+        return;
       }
       var a = b.dataset.ov;
-      if (a === 'start' || a === 'again') startGame();
-      else if (a === 'setup') setupOverlay();
+      if (a === 'start') startGame(true);
+      else if (a === 'again') startGame(false);
+      else if (a === 'setup') setupOverlay(true);
       else if (a === 'resume') setPaused(false);
     });
 
     // ---------- actions ----------
     function seatList() {
-      var on = seats.filter(function (x) { return x.type !== 'off'; });
-      var nh = on.filter(function (x) { return x.type === 'human'; }).length, nc = on.length - nh, hum = 0, cpu = 0;
-      return on.map(function (x) {
-        if (x.type === 'cpu') { cpu++; return { type: 'cpu', name: nc > 1 ? 'CPU ' + cpu : 'CPU' }; }
-        hum++; return { type: 'human', name: nh > 1 ? 'Player ' + hum : 'You' };
-      });
+      var list = [];
+      seats.forEach(function (x, i) { if (x.type !== 'off') list.push({ type: x.type, name: x.name || randomName([]), seat: i }); });
+      return list;
     }
-    function startGame() {
+    // fromSetup: use the names shown on the setup screen; otherwise (Restart /
+    // Play again) every seat that wasn't renamed gets a fresh random name
+    function startGame(fromSetup, opts) {
+      if (!fromSetup) rollNames();
+      renaming = -1;
       particles = []; floaters = []; flyers = []; confetti = [];
-      G.start(seatList()); hideOverlay(); syncTray(); syncPlayers(); syncLog(); syncUI(true);
+      G.start(seatList(), opts); hideOverlay(); syncTray(); syncPlayers(); syncLog(); syncUI(true);
+    }
+    function syncHazard(pop) {
+      var hz = G.hazardInfo();
+      if (!hazardEl) return;
+      if (G.phase === 'idle' && !hazardSeen) hazardEl.innerHTML = '<span class="dw-hz-emoji">\u2728</span> <b>A new slide-down animal every game</b>';
+      else hazardEl.innerHTML = '<span class="dw-hz-lbl">' + (G.phase === 'idle' ? 'Last round' : 'This round') + ':</span> <span class="dw-hz-emoji">' + hz.emoji + '</span> <b>' + esc(hz.name) + '</b>';
+      hazardEl.dataset.hazard = hz.id;
+      hazardEl.title = hz.plural + ' slide you down this game';
+      if (pop) { hazardEl.classList.remove('pop'); void hazardEl.offsetWidth; hazardEl.classList.add('pop'); }
     }
     function setPaused(p) {
       if (!G.isActive()) return;
@@ -1039,8 +1426,8 @@
       storage.set('doodlewheel-speed', String(SPEEDS[speedIdx])); syncUI(true);
     }
     spinBtn.addEventListener('click', function () { trySpin(); spinBtn.blur(); });
-    btnNew.addEventListener('click', function () { if (G.isActive() && !G.paused) G.togglePause(true); setupOverlay(); syncUI(true); btnNew.blur(); });
-    btnRestart.addEventListener('click', function () { startGame(); btnRestart.blur(); });
+    btnNew.addEventListener('click', function () { if (G.isActive() && !G.paused) G.togglePause(true); setupOverlay(true); syncUI(true); btnNew.blur(); });
+    btnRestart.addEventListener('click', function () { startGame(false); btnRestart.blur(); });
     btnPause.addEventListener('click', function () { setPaused(!G.paused); btnPause.blur(); });
     btnSpeed.addEventListener('click', function () { cycleSpeed(); btnSpeed.blur(); });
     boardInner.addEventListener('pointerdown', function (e) {
@@ -1053,7 +1440,7 @@
       if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
       if (k === ' ' || k === 'Spacebar' || k === 'Enter') {
         e.preventDefault(); if (e.repeat) return;
-        if (G.phase === 'idle' || G.phase === 'over') { if (overlay.classList.contains('show')) startGame(); }
+        if (G.phase === 'idle' || G.phase === 'over') { if (overlay.classList.contains('show')) startGame(overlayMode === 'setup'); }
         else if (G.paused) setPaused(false);
         else trySpin();
       } else if (k === 'p' || k === 'P' || k === 'Escape') { e.preventDefault(); if (G.isActive()) setPaused(!G.paused); }
@@ -1066,7 +1453,12 @@
     G.onEvent = function (type, d) {
       var c;
       if (type === 'hop') { c = center(d.sq); burst(c.x, c.y + s * 0.3, ['rgba(255,255,255,0.7)'], 3); }
-      else if (type === 'snake') { c = center(d.from); shake = 0.8; floater('Snake! \u2193' + d.to, c.x, c.y - s * 0.4, '#fca5a5'); }
+      else if (type === 'snake') {
+        var hz = HAZARD_BY_ID[d.hazard] || HAZARDS[0], hs = HZ_STYLE[hz.id] || {};
+        c = center(d.from); shake = hs.shake || 0.8;
+        if (hs.trail) burst(c.x, c.y, hs.trail, 16, hz.id === 'caterpillar' ? 'leaf' : 'drop');
+        floater(hz.emoji + ' ' + hz.sfx + ' \u2193' + d.to, c.x, c.y - s * 0.4, '#fca5a5');
+      }
       else if (type === 'rope') { c = center(d.from); burst(c.x, c.y, ['#c99554', '#fde68a', '#fff'], 14); floater('Rope! \u2191' + d.to + ' +' + d.points, c.x, c.y - s * 0.4, '#fcd34d'); }
       else if (type === 'animal') {
         c = center(d.sq); burst(c.x, c.y, ['#f9a8d4', '#fda4af', '#fde68a', '#fff'], 14, 'heart');
@@ -1082,6 +1474,7 @@
         setTimeout(function () { if (G.phase === 'over') winOverlay(d); }, 1400);
       } else if (type === 'spun') { lastEl.textContent = G.players[d.player].name + ' spun ' + d.result; }
       if (type === 'log') syncLog();
+      if (type === 'start') { hazardSeen = true; syncHazard(true); }
       if (type !== 'hop') syncPlayers(); else syncPlayersPos();
     };
     function syncPlayersPos() {
@@ -1095,11 +1488,11 @@
       if (force) last = {};
       var p = G.current(), human = G.isHumanTurn(), txt;
       if (G.phase === 'idle') txt = 'Pick players and start';
-      else if (G.phase === 'over') txt = '\u{1F3C6} ' + G.players[G.winner].name + (G.players[G.winner].name === 'You' ? ' win!' : ' wins!');
+      else if (G.phase === 'over') txt = '\u{1F3C6} ' + G.players[G.winner].name + ' wins!';
       else if (G.paused) txt = 'Paused';
-      else if (G.phase === 'ready') txt = human ? (p.name === 'You' ? 'Your turn: tap Spin' : p.name + ': tap Spin') : p.name + ' is thinking\u2026';
-      else if (G.phase === 'spinning' || G.phase === 'landed') txt = (p.name === 'You' ? 'You are' : p.name + ' is') + ' spinning\u2026';
-      else txt = (p.name === 'You' ? 'You are' : p.name + ' is') + ' moving\u2026';
+      else if (G.phase === 'ready') txt = human ? p.name + ': tap Spin' : p.name + ' is thinking\u2026';
+      else if (G.phase === 'spinning' || G.phase === 'landed') txt = p.name + ' is spinning\u2026';
+      else txt = p.name + ' is moving\u2026';
       var st = txt + '|' + human + '|' + G.paused + '|' + G.speed + '|' + G.phase;
       if (last.st === st) return;
       last.st = st;
@@ -1130,7 +1523,10 @@
       pause: function () { if (G.isActive() && !G.paused) setPaused(true); },
       resize: resize,
       setTheme: function (id) { applyTheme(id, true); },
-      theme: function () { return themeId; }
+      theme: function () { return themeId; },
+      hazard: function () { return G.hazard; },
+      newGame: function (opts) { startGame(false, opts); }, // automation: start with fresh names (opts.hazard forces one)
+      seats: function () { return seats.map(function (st) { return { type: st.type, name: st.name, custom: st.custom }; }); }
     };
 
     themeBtns.forEach(function (b) {
@@ -1141,7 +1537,8 @@
 
     resize();
     syncTray();
-    setupOverlay();
+    syncHazard(false);
+    setupOverlay(true);
     syncUI(true);
     requestAnimationFrame(frame);
   }
