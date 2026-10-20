@@ -471,9 +471,38 @@
   api.drawCreature = drawCreature;
 
   // ---------- board drawing helpers ----------
-  var SQ_COLORS = ['#f87171', '#fb923c', '#facc15', '#a3e635', '#4ade80', '#2dd4bf', '#38bdf8', '#818cf8', '#c084fc', '#f472b6'];
   var SNAKE_COLORS = [['#22c55e', '#166534', '#bbf7d0'], ['#f97316', '#9a3412', '#fed7aa'], ['#a855f7', '#581c87', '#e9d5ff'], ['#ef4444', '#7f1d1d', '#fecaca'],
     ['#06b6d4', '#164e63', '#cffafe'], ['#eab308', '#713f12', '#fef08a'], ['#ec4899', '#831843', '#fbcfe8'], ['#84cc16', '#365314', '#ecfccb']];
+
+  // Board themes (visual only; gameplay is identical on every theme).
+  var THEMES = {
+    mint: {
+      name: 'Mint Meadow', meta: '#eaf7ef',
+      bg: ['#f3fbf5', '#e6f6ec'], pattern: 'grass', patternColor: 'rgba(52,168,107,0.16)', dotColor: 'rgba(52,168,107,0.10)',
+      tiles: ['#c9f0d9', '#fde8c6', '#d4ebfb', '#fbd5e2', '#e4dcfb', '#fff1b3'], tileAlpha: [1, 0.82],
+      tileBorder: 'rgba(31,122,84,0.30)', tileShadow: 'rgba(31,94,66,0.10)',
+      number: '#244637', numberHalo: 'rgba(255,255,255,0.85)', badge: '#0f766e', star: '#f59e0b',
+      pad: 'rgba(255,255,255,0.75)', dim: 'rgba(20,48,38,0.55)', tokenRing: 'rgba(20,40,32,0.6)', floaterStroke: 'rgba(255,255,255,0.95)'
+    },
+    sunset: {
+      name: 'Sunset Pop', meta: '#ffd9c7',
+      bg: ['#ffd3bd', '#f1c6ea'], pattern: 'stripes', patternColor: 'rgba(255,255,255,0.28)', dotColor: 'rgba(255,255,255,0.0)',
+      tiles: ['#ffb3a0', '#ffd2b4', '#ffc7dd', '#dcc4fb', '#ffe3a3', '#f9b8cf'], tileAlpha: [0.92, 0.74],
+      tileBorder: 'rgba(255,255,255,0.75)', tileShadow: 'rgba(138,45,80,0.12)',
+      number: '#5a1f3b', numberHalo: 'rgba(255,255,255,0.7)', badge: '#9d174d', star: '#f97316',
+      pad: 'rgba(255,255,255,0.6)', dim: 'rgba(70,22,48,0.55)', tokenRing: 'rgba(70,20,45,0.6)', floaterStroke: 'rgba(255,255,255,0.95)'
+    },
+    ocean: {
+      name: 'Ocean Breeze', meta: '#0a2a43',
+      bg: ['#0b2a46', '#0d5a6e'], pattern: 'bubbles', patternColor: 'rgba(186,240,255,0.14)', dotColor: 'rgba(186,240,255,0.08)',
+      tiles: ['#11698a', '#16858c', '#0e5779', '#24938a', '#1a73a3', '#2d7f9b'], tileAlpha: [0.62, 0.46],
+      tileBorder: 'rgba(148,233,255,0.45)', tileShadow: 'rgba(0,0,0,0.18)',
+      number: '#eafcff', numberHalo: 'rgba(5,30,48,0.7)', badge: '#fde68a', star: '#facc15',
+      pad: 'rgba(255,255,255,0.16)', dim: 'rgba(3,18,32,0.62)', tokenRing: 'rgba(0,0,0,0.55)', floaterStroke: 'rgba(5,25,40,0.9)'
+    }
+  };
+  var THEME_ORDER = ['mint', 'sunset', 'ocean'];
+  api.THEMES = THEMES;
 
   function rr(ctx, x, y, w, h, r) {
     ctx.beginPath();
@@ -503,6 +532,20 @@
     try { seats = JSON.parse(storage.get('doodlewheel-players') || 'null'); } catch (e) { seats = null; }
     if (!Array.isArray(seats) || !seats.length) seats = [{ type: 'human' }, { type: 'cpu' }, { type: 'off' }, { type: 'off' }];
     while (seats.length < 4) seats.push({ type: 'off' });
+    var themeId = storage.get('doodlewheel-theme');
+    if (!THEMES[themeId]) themeId = 'mint';
+    var TH = THEMES[themeId];
+    var appEl = $('doodleApp'), metaTheme = document.querySelector('meta[name="theme-color"]'), themeBtns = document.querySelectorAll('.dw-sw');
+    function applyTheme(id, save) {
+      if (!THEMES[id]) id = 'mint';
+      themeId = id; TH = THEMES[id];
+      appEl.dataset.theme = id;
+      document.body.dataset.dwtheme = id;
+      themeBtns.forEach(function (b) { var on = b.dataset.theme === id; b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); });
+      if (metaTheme && (!root.arcade || root.arcade.current === 'doodle')) metaTheme.setAttribute('content', TH.meta);
+      if (save) storage.set('doodlewheel-theme', id);
+      if (size && boardCache.width) drawSquares(bctx); // instant redraw, game state untouched
+    }
     var SPEEDS = [1, 2, 4], speedIdx = 0;
     try { speedIdx = Math.max(0, SPEEDS.indexOf(+storage.get('doodlewheel-speed'))); } catch (e) { speedIdx = 0; }
     G.setSpeed(SPEEDS[speedIdx]);
@@ -563,29 +606,68 @@
     window.addEventListener('orientationchange', function () { setTimeout(resize, 200); });
     if (window.ResizeObserver) new ResizeObserver(resize).observe(boardWrap);
 
+    function drawPattern(c) {
+      var i, j, k;
+      c.save();
+      if (TH.pattern === 'grass') { // soft polka dots + little grass tufts
+        c.fillStyle = TH.dotColor;
+        for (j = 0; j <= SIZE * 2; j++) for (i = 0; i <= SIZE * 2; i++) if ((i + j) % 2 === 0) { c.beginPath(); c.arc(i * s / 2, j * s / 2, s * 0.06, 0, TAU); c.fill(); }
+        c.strokeStyle = TH.patternColor; c.lineWidth = Math.max(1, s * 0.035); c.lineCap = 'round';
+        for (k = 0; k < 60; k++) {
+          var gx = ((k * 37) % 100) / 100 * size, gy = ((k * 61 + 13) % 100) / 100 * size, h = s * 0.16;
+          c.beginPath(); c.moveTo(gx - h * 0.5, gy); c.quadraticCurveTo(gx - h * 0.45, gy - h * 0.6, gx - h * 0.7, gy - h);
+          c.moveTo(gx, gy); c.lineTo(gx, gy - h * 1.2);
+          c.moveTo(gx + h * 0.5, gy); c.quadraticCurveTo(gx + h * 0.45, gy - h * 0.6, gx + h * 0.7, gy - h); c.stroke();
+        }
+      } else if (TH.pattern === 'stripes') { // soft diagonal stripes + a wavy line
+        c.fillStyle = TH.patternColor;
+        for (k = -SIZE * 2; k < SIZE * 2; k++) {
+          var x0 = k * s * 0.5;
+          c.beginPath(); c.moveTo(x0, 0); c.lineTo(x0 + s * 0.18, 0); c.lineTo(x0 + s * 0.18 + size, size); c.lineTo(x0 + size, size); c.closePath(); c.fill();
+        }
+      } else { // bubbles + gentle waves
+        c.strokeStyle = TH.patternColor; c.lineWidth = Math.max(1, s * 0.03);
+        for (k = 0; k < 70; k++) {
+          var bx = ((k * 53) % 100) / 100 * size, by = ((k * 29 + 7) % 100) / 100 * size, br = s * (0.06 + (k % 5) * 0.035);
+          c.beginPath(); c.arc(bx, by, br, 0, TAU); c.stroke();
+          c.fillStyle = TH.dotColor; c.beginPath(); c.arc(bx - br * 0.35, by - br * 0.35, br * 0.22, 0, TAU); c.fill();
+        }
+        for (j = 1; j < SIZE; j += 2) {
+          c.beginPath();
+          for (i = 0; i <= 40; i++) { var wx = i / 40 * size; c.lineTo(wx, j * s + Math.sin(i / 40 * TAU * 3) * s * 0.08); }
+          c.stroke();
+        }
+      }
+      c.restore();
+    }
     function drawSquares(c) {
-      c.fillStyle = '#0f1530'; c.fillRect(0, 0, size, size);
+      var grd = c.createLinearGradient(0, 0, size, size);
+      grd.addColorStop(0, TH.bg[0]); grd.addColorStop(1, TH.bg[1]);
+      c.fillStyle = grd; c.fillRect(0, 0, size, size);
+      drawPattern(c);
+      var fs = Math.max(8, Math.round(s * 0.24));
       for (var n = 1; n <= LAST; n++) {
         var cl = squareToCell(n), x = cl.col * s, y = (SIZE - 1 - cl.row) * s;
-        var col = SQ_COLORS[(cl.row + cl.col * 3) % SQ_COLORS.length];
-        c.globalAlpha = (cl.row + cl.col) % 2 ? 0.2 : 0.3;
-        c.fillStyle = col; rr(c, x + 1.5, y + 1.5, s - 3, s - 3, s * 0.16); c.fill();
-        c.globalAlpha = 0.55; c.strokeStyle = col; c.lineWidth = 1.2; c.setLineDash([s * 0.09, s * 0.07]); c.stroke(); c.setLineDash([]);
-        c.globalAlpha = 1;
-        c.fillStyle = 'rgba(255,255,255,0.78)';
-        c.font = '800 ' + Math.max(8, Math.round(s * 0.24)) + 'px ui-sans-serif, system-ui, sans-serif';
+        var col = TH.tiles[(cl.row * 2 + cl.col * 3) % TH.tiles.length];
+        c.globalAlpha = 1; c.fillStyle = TH.tileShadow; rr(c, x + 2, y + 3, s - 4, s - 4, s * 0.18); c.fill();
+        c.globalAlpha = TH.tileAlpha[(cl.row + cl.col) % 2];
+        c.fillStyle = col; rr(c, x + 2, y + 2, s - 4, s - 4, s * 0.18); c.fill();
+        c.globalAlpha = 1; c.strokeStyle = TH.tileBorder; c.lineWidth = 1.2; c.setLineDash([s * 0.09, s * 0.07]); c.stroke(); c.setLineDash([]);
+        c.font = '800 ' + fs + 'px ui-sans-serif, system-ui, sans-serif';
         c.textAlign = 'left'; c.textBaseline = 'top';
-        c.fillText(String(n), x + s * 0.1, y + s * 0.08);
+        c.lineWidth = Math.max(2, fs * 0.22); c.lineJoin = 'round'; c.strokeStyle = TH.numberHalo;
+        c.strokeText(String(n), x + s * 0.11, y + s * 0.09);
+        c.fillStyle = TH.number; c.fillText(String(n), x + s * 0.11, y + s * 0.09);
       }
       // start + finish badges
       var a = center(1), b = center(LAST);
       c.textAlign = 'center'; c.textBaseline = 'middle';
       c.font = '900 ' + Math.max(7, Math.round(s * 0.2)) + 'px ui-sans-serif, system-ui, sans-serif';
-      c.fillStyle = '#fde68a'; c.fillText('START', a.x, a.y + s * 0.28);
+      c.fillStyle = TH.badge; c.fillText('START', a.x, a.y + s * 0.28);
       c.save(); c.translate(b.x, b.y + s * 0.06);
-      star(c, 0, 0, s * 0.3, s * 0.13, '#facc15');
+      star(c, 0, 0, s * 0.3, s * 0.13, TH.star);
       c.restore();
-      c.fillStyle = '#fde68a'; c.fillText('FINISH', b.x, b.y + s * 0.38);
+      c.fillStyle = TH.badge; c.fillText('FINISH', b.x, b.y + s * 0.38);
     }
     function star(c, x, y, R, r, fill) {
       c.beginPath();
@@ -664,7 +746,7 @@
       var cur = G.current();
       ANIMALS.forEach(function (a, i) {
         var p = center(a.sq), bob = Math.sin(now * 0.004 + i) * s * 0.03, sz = s * 0.56;
-        circle(ctx, p.x + s * 0.08, p.y + s * 0.08, s * 0.3, 'rgba(255,255,255,0.12)');
+        circle(ctx, p.x + s * 0.08, p.y + s * 0.08, s * 0.3, TH.pad);
         ctx.drawImage(emojiSprite(a.emoji), p.x + s * 0.08 - sz / 2, p.y + s * 0.08 - sz / 2 + bob, sz, sz);
         if (a.perk) {
           var lbl = a.perk === 'hop2' ? '+2' : '\u21bb';
@@ -720,6 +802,7 @@
         ctx.strokeStyle = p.token.color; ctx.lineWidth = 2; ctx.globalAlpha = 0.5 + Math.sin(now * 0.008) * 0.4;
         ctx.beginPath(); ctx.arc(0, 0, r * 1.45, 0, TAU); ctx.stroke(); ctx.globalAlpha = 1;
       }
+      circle(ctx, 0, 0, r + 3.5, TH.tokenRing);
       circle(ctx, 0, 0, r + 2, '#fff');
       var gr = ctx.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.1, 0, 0, r);
       gr.addColorStop(0, '#fff'); gr.addColorStop(0.25, p.token.color); gr.addColorStop(1, p.token.dark);
@@ -737,7 +820,7 @@
     function drawWheel(now, dt) {
       if (G.phase !== 'spinning' && G.phase !== 'landed') { popT = 0; return; }
       var w = G.wheel, gm = wheelGeom(), cx = gm.cx, cy = gm.cy, R = gm.R, i, p = G.current();
-      ctx.fillStyle = 'rgba(6,8,20,0.6)'; ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = TH.dim; ctx.fillRect(0, 0, size, size);
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.font = '800 ' + Math.round(R * 0.15) + 'px ui-sans-serif, system-ui, sans-serif';
       ctx.fillStyle = p.token.color;
@@ -825,7 +908,7 @@
         ctx.globalAlpha = Math.min(1, fl.life * 2);
         ctx.font = '800 ' + Math.round(s * 0.36) + 'px ui-sans-serif, system-ui, sans-serif';
         var fx = Math.max(s * 2.2, Math.min(size - s * 2.2, fl.x));
-        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(10,14,28,0.85)'; ctx.strokeText(fl.text, fx, fl.y);
+        ctx.lineWidth = 3.5; ctx.strokeStyle = TH.floaterStroke; ctx.strokeText(fl.text, fx, fl.y);
         ctx.fillStyle = fl.color; ctx.fillText(fl.text, fx, fl.y);
       }
       ctx.globalAlpha = 1;
@@ -1045,8 +1128,16 @@
 
     root.doodleUI = {
       pause: function () { if (G.isActive() && !G.paused) setPaused(true); },
-      resize: resize
+      resize: resize,
+      setTheme: function (id) { applyTheme(id, true); },
+      theme: function () { return themeId; }
     };
+
+    themeBtns.forEach(function (b) {
+      b.addEventListener('click', function () { applyTheme(b.dataset.theme, true); b.blur(); });
+    });
+    root.addEventListener('hashchange', function () { applyTheme(themeId, false); });
+    applyTheme(themeId, false);
 
     resize();
     syncTray();

@@ -26,6 +26,12 @@
     });
     arcade.current = id;
     document.title = GAMES[id].title;
+    document.body.dataset.game = id; // lets the Doodle Wheel theme style the page only on its tab
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      var th = id === 'doodle' && root.DoodleWheel && root.DoodleWheel.THEMES && root.doodleUI && root.DoodleWheel.THEMES[root.doodleUI.theme()];
+      meta.setAttribute('content', th ? th.meta : '#0a0e1c');
+    }
     try { localStorage.setItem(KEY, id); } catch (e) { /* ignore */ }
     if (!(opts && opts.initial) && root.history && history.replaceState) history.replaceState(null, '', '#' + id);
     var ui = root[GAMES[id].ui];

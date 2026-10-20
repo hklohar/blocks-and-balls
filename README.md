@@ -21,6 +21,7 @@ A doodle-style snakes-and-ladders board game where a 1-10 spin wheel replaces th
 - 1-4 players, each Human or CPU (default: you vs 1 CPU), pass-and-play turns with a turn indicator, and a short move log.
 - The first to land exactly on 100 wins, with confetti and a stats table (spins, snakes, ropes, animals, creatures). High score, best collection and lifetime stats are saved in the browser.
 - New Game, Restart, Pause (P/Esc) and Speed (1x/2x/4x, or F).
+- Three board themes via the swatches next to the title: Mint Meadow (default), Sunset Pop and Ocean Breeze. Each has its own palette, page background and board pattern. Your pick is remembered, and switching redraws the board without touching the game.
 
 Open `index.html` directly or serve the folder. `arcade.js` handles the tabs.
 
