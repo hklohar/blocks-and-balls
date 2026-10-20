@@ -87,8 +87,64 @@
   }
   function cleanName(t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim().slice(0, NAME_MAX); }
 
-  var POINTS = { animal: 40, animalAgain: 10, creature: 150, ropeBase: 30, win: 300 };
-  var T = { cpu: 850, spin: 2600, landed: 650, hop: 230, slide: 1300, climb: 1100, gap: 500 };
+  // animal: first capture by this player (perk too); animalSteal: win it back from an opponent;
+  // animalAgain: land on your own animal. creature: catch an unowned creature; creatureSteal: take one from an opponent.
+  var POINTS = { animal: 40, animalAgain: 10, animalSteal: 25, creature: 150, creatureSteal: 60, ropeBase: 30, win: 300 };
+  var T = { cpu: 850, spin: 2600, landed: 650, hop: 230, slide: 1300, climb: 1100, gap: 500, reshuffle: 1600 };
+
+  // Board styles: the boosts are ropes, wooden ladders or dungeon stairs (wording follows the style).
+  var BOARDS = {
+    ropes: { id: 'ropes', name: 'Ropes', boost: 'rope', boosts: 'ropes', Boosts: 'Ropes', emoji: '\u{1FAA2}', climb: 'climbed the rope' },
+    ladders: { id: 'ladders', name: 'Ladders', boost: 'ladder', boosts: 'ladders', Boosts: 'Ladders', emoji: '\u{1FA9C}', climb: 'climbed the ladder' },
+    dungeon: { id: 'dungeon', name: 'Dungeon', boost: 'staircase', boosts: 'stairs', Boosts: 'Stairs', emoji: '\u{1F3F0}', climb: 'climbed the stairs' }
+  };
+  var BOARD_ORDER = ['ropes', 'ladders', 'dungeon'];
+  var RESHUFFLE_AT = 5; // boosts climbed while every opponent still has 0
+
+  // Squares a hazard may never use: boosts (both ends), items, start and finish.
+  function blockedSquares() {
+    var b = {}; b[1] = b[LAST] = 1;
+    Object.keys(ROPES).forEach(function (k) { b[k] = 1; b[ROPES[k]] = 1; });
+    ANIMALS.forEach(function (a) { b[a.sq] = 1; }); CREATURES.forEach(function (c) { b[c.sq] = 1; });
+    return b;
+  }
+  function rowOf(n) { return Math.floor((n - 1) / SIZE); }
+  // Is a hazard map valid? heads above tails (higher row), all endpoints distinct,
+  // never on a boost end / item / 1 / 100, so no loops are possible.
+  function validHazards(map, count) {
+    var bl = blockedSquares(), used = {}, heads = Object.keys(map).map(Number);
+    if (count != null && heads.length !== count) return false;
+    for (var i = 0; i < heads.length; i++) {
+      var h = heads[i], t = map[h];
+      if (!(t >= 2 && h <= LAST - 1) || rowOf(h) <= rowOf(t)) return false;
+      if (bl[h] || bl[t] || used[h] || used[t]) return false;
+      used[h] = used[t] = 1;
+    }
+    return true;
+  }
+  // Random new hazard layout with the same count; differs from `old`.
+  function randomHazards(count, rnd, old) {
+    rnd = rnd || Math.random;
+    var bl = blockedSquares();
+    for (var attempt = 0; attempt < 500; attempt++) {
+      var map = {}, used = {}, ok = true;
+      for (var k = 0; k < count && ok; k++) {
+        var placed = false;
+        for (var tries = 0; tries < 200 && !placed; tries++) {
+          var h = 12 + Math.floor(rnd() * (LAST - 12)); // 12..99
+          var len = 8 + Math.floor(rnd() * 38);         // slides 8..45 squares
+          var t = h - len;
+          if (t < 2 || h > LAST - 1 || bl[h] || bl[t] || used[h] || used[t] || rowOf(h) <= rowOf(t)) continue;
+          map[h] = t; used[h] = used[t] = 1; placed = true;
+        }
+        if (!placed) ok = false;
+      }
+      if (!ok || !validHazards(map, count)) continue;
+      if (old && JSON.stringify(Object.keys(map).sort()) === JSON.stringify(Object.keys(old).sort())) continue;
+      return map;
+    }
+    return Object.assign({}, old || SNAKES);
+  }
   var WHEEL_SEGMENTS = 10, SEG_DEG = 36;
 
   function mod(a, n) { return ((a % n) + n) % n; }
@@ -125,6 +181,7 @@
     opts = opts || {};
     var rng = opts.rng || Math.random;
     var hazardRng = opts.hazardRng || Math.random; // separate stream: never shifts the spin sequence
+    var allowReshuffle = opts.reshuffle !== false;
     var storage = opts.storage || null;
     var g = {
       phase: 'idle', paused: false, speed: 1,
@@ -132,7 +189,8 @@
       wheel: { angle: 0, from: 0, to: 0, t: 0, result: null, landed: null, spinning: false },
       path: [], pathIdx: 0, hopT: 0, hopFrom: 1,
       anim: null, perkUsed: false, extraTurn: false,
-      collected: {}, log: [], winner: null, onEvent: null,
+      collected: {}, animalOwner: {}, snakes: Object.assign({}, SNAKES), board: 'ropes', offer: null,
+      log: [], winner: null, onEvent: null,
       high: 0, bestCollection: 0, stats: null, hazard: 'snake'
     };
     function emit(type, data) { if (g.onEvent) { try { g.onEvent(type, data || {}); } catch (e) { if (typeof console !== 'undefined') console.error(e); } } }
@@ -146,6 +204,12 @@
     if (!g.stats.byHazard || typeof g.stats.byHazard !== 'object') g.stats.byHazard = {};
     if (HAZARD_BY_ID[load('doodlewheel-hazard')]) g.hazard = load('doodlewheel-hazard');
     g.hazardInfo = function () { return HAZARD_BY_ID[g.hazard]; };
+    if (BOARDS[load('doodlewheel-board')]) g.board = load('doodlewheel-board');
+    g.boardInfo = function () { return BOARDS[g.board]; };
+    g.setBoard = function (id) { if (BOARDS[id]) { g.board = id; save('doodlewheel-board', id); emit('board', { board: id }); } return g.board; };
+    // what a player owns right now
+    g.ownedAnimals = function (pid) { return ANIMALS.filter(function (a) { return g.animalOwner[a.kind] === pid; }).length; };
+    g.ownedCreatures = function (pid) { return CREATURES.filter(function (c) { return g.collected[c.id] === pid; }).map(function (c) { return c.id; }); };
     g.setRng = function (fn) { rng = typeof fn === 'function' ? fn : Math.random; };
     g.rename = function (id, name) {
       var p = g.players[id], nm = cleanName(name);
@@ -170,10 +234,10 @@
       save('doodlewheel-hazard', g.hazard);
       g.players = seats.map(function (s, i) {
         return { id: i, seat: s.seat != null ? s.seat : i, type: s.type === 'cpu' ? 'cpu' : 'human', name: cleanName(s.name) || (s.type === 'cpu' ? 'CPU ' + (i + 1) : 'Player ' + (i + 1)),
-          token: TOKENS[i], pos: 1, score: 0, friends: {}, creatures: [],
-          stats: { spins: 0, snakes: 0, ropes: 0, animals: 0, creatures: 0, bounces: 0 } };
+          token: TOKENS[i], pos: 1, score: 0, friends: {}, creatures: [], reshuffleOffered: false,
+          stats: { spins: 0, snakes: 0, ropes: 0, animals: 0, creatures: 0, bounces: 0, steals: 0, reshuffles: 0 } };
       });
-      g.turn = 0; g.turnCount = 0; g.collected = {}; g.log = []; g.winner = null;
+      g.turn = 0; g.turnCount = 0; g.collected = {}; g.animalOwner = {}; g.snakes = Object.assign({}, SNAKES); g.offer = null; g.log = []; g.winner = null;
       g.path = []; g.pathIdx = 0; g.hopT = 0; g.anim = null; g.perkUsed = false; g.extraTurn = false; g.paused = false;
       g.wheel.result = null; g.wheel.landed = null; g.wheel.spinning = false;
       beginTurn();
@@ -218,12 +282,16 @@
 
     function collectAt(sq) {
       var c = CREATURE_AT[sq], p = g.current();
-      if (!c || g.collected[c.id] != null) return;
+      if (!c) return;
+      var prev = g.collected[c.id];
+      if (prev === p.id) return;
+      var pts = prev == null ? POINTS.creature : POINTS.creatureSteal;
+      if (prev != null) { var q = g.players[prev]; q.creatures = q.creatures.filter(function (k) { return k !== c.id; }); p.stats.steals++; }
       g.collected[c.id] = p.id;
       p.creatures.push(c.id); p.stats.creatures++;
-      p.score += POINTS.creature;
-      addLog(p.name + ' caught ' + c.name + '! +' + POINTS.creature);
-      emit('catch', { player: p.id, kind: c.id, name: c.name, sq: sq, points: POINTS.creature });
+      p.score += pts;
+      addLog(prev == null ? p.name + ' caught ' + c.name + '! +' + pts : p.name + ' took ' + c.name + ' from ' + g.players[prev].name + '! +' + pts);
+      emit('catch', { player: p.id, kind: c.id, name: c.name, sq: sq, points: pts, from: prev == null ? null : prev });
     }
 
     function win(p) {
@@ -232,7 +300,7 @@
       addLog(p.name + ' reached 100 and wins!');
       var humans = g.players.filter(function (x) { return x.type === 'human'; });
       var best = humans.reduce(function (m, x) { return Math.max(m, x.score); }, 0);
-      var bestColl = humans.reduce(function (m, x) { return Math.max(m, x.creatures.length); }, 0);
+      var bestColl = humans.reduce(function (m, x) { return Math.max(m, g.ownedCreatures(x.id).length); }, 0);
       var newRecord = humans.length > 0 && best > g.high;
       if (newRecord) { g.high = best; save('doodlewheel-high', String(g.high)); }
       var newBestCollection = humans.length > 0 && bestColl > g.bestCollection;
@@ -240,30 +308,67 @@
       var st = g.stats;
       st.games++;
       if (p.type === 'human') st.wins++; else st.cpuWins++;
+      g.players.forEach(function (x) { x.owned = { animals: g.ownedAnimals(x.id), creatures: g.ownedCreatures(x.id).length }; });
       st.byHazard[g.hazard] = (st.byHazard[g.hazard] || 0) + humans.reduce(function (m, h) { return m + h.stats.snakes; }, 0);
       humans.forEach(function (h) { st.spins += h.stats.spins; st.snakes += h.stats.snakes; st.ropes += h.stats.ropes; st.animals += h.stats.animals; st.creatures += h.stats.creatures; });
       save('doodlewheel-stats', JSON.stringify(st));
       emit('win', { player: p.id, newRecord: newRecord, newBestCollection: newBestCollection, high: g.high, bestCollection: g.bestCollection });
     }
 
-    function endTurn() { g.phase = 'gap'; g.timer = T.gap; }
+    // 5-0 reshuffle offer: checked whenever a move finishes
+    function reshuffleEligible(p) {
+      if (!allowReshuffle || g.players.length < 2 || p.reshuffleOffered || p.stats.ropes < RESHUFFLE_AT) return false;
+      return g.players.every(function (o) { return o === p || o.stats.ropes === 0; });
+    }
+    function endTurn() {
+      var p = g.current();
+      if (p && reshuffleEligible(p)) {
+        p.reshuffleOffered = true;
+        g.offer = { player: p.id }; g.phase = 'offer'; g.timer = T.cpu * 1.6;
+        addLog(p.name + ' has ' + p.stats.ropes + ' ' + BOARDS[g.board].boosts + ' to 0: reshuffle the ' + HAZARD_BY_ID[g.hazard].plural + '?');
+        emit('offer', { player: p.id });
+        return;
+      }
+      g.phase = 'gap'; g.timer = T.gap;
+    }
+    function doReshuffle() {
+      var p = g.current(), old = g.snakes;
+      g.snakes = randomHazards(Object.keys(old).length, hazardRng, old);
+      g.offer = null; p.stats.reshuffles++;
+      g.anim = { type: 'reshuffle', old: old, t: 0, dur: T.reshuffle };
+      g.phase = 'reshuffling';
+      addLog(p.name + ' reshuffled the ' + HAZARD_BY_ID[g.hazard].plural + '!');
+      emit('reshuffle', { player: p.id, old: old, snakes: g.snakes });
+    }
+    g.acceptReshuffle = function () {
+      if (g.phase !== 'offer' || g.paused) return false;
+      doReshuffle(); return true;
+    };
+    g.declineReshuffle = function () {
+      if (g.phase !== 'offer' || g.paused) return false;
+      var p = g.current();
+      g.offer = null; addLog(p.name + ' kept the ' + HAZARD_BY_ID[g.hazard].plural + ' where they are');
+      emit('decline', { player: p.id });
+      g.phase = 'gap'; g.timer = T.gap; return true;
+    };
 
     // Called once the token stops (after hops, a slide or a climb).
     function resolve() {
       var p = g.current(), sq = p.pos;
-      if (SNAKES[sq]) {
+      var SN = g.snakes;
+      if (SN[sq]) {
         p.stats.snakes++;
         var hz = HAZARD_BY_ID[g.hazard];
-        addLog(p.name + ' slid down the ' + hz.name + '! ' + sq + ' \u2192 ' + SNAKES[sq]);
-        g.anim = { type: 'slide', from: sq, to: SNAKES[sq], t: 0, dur: T.slide };
+        addLog(p.name + ' slid down the ' + hz.name + '! ' + sq + ' \u2192 ' + SN[sq]);
+        g.anim = { type: 'slide', from: sq, to: SN[sq], t: 0, dur: T.slide };
         g.phase = 'sliding';
-        emit('snake', { player: p.id, from: sq, to: SNAKES[sq], hazard: g.hazard });
+        emit('snake', { player: p.id, from: sq, to: SN[sq], hazard: g.hazard });
         return;
       }
       if (ROPES[sq]) {
         var pts = POINTS.ropeBase + (ROPES[sq] - sq);
         p.stats.ropes++; p.score += pts;
-        addLog(p.name + ' climbed a rope: ' + sq + ' \u2192 ' + ROPES[sq] + ' +' + pts);
+        addLog(p.name + ' ' + BOARDS[g.board].climb + ': ' + sq + ' \u2192 ' + ROPES[sq] + ' +' + pts);
         g.anim = { type: 'climb', from: sq, to: ROPES[sq], t: 0, dur: T.climb };
         g.phase = 'climbing';
         emit('rope', { player: p.id, from: sq, to: ROPES[sq], points: pts });
@@ -272,13 +377,18 @@
       if (sq === LAST) { win(p); return; }
       var a = ANIMAL_AT[sq];
       if (a) {
-        var first = !p.friends[a.kind];
-        var ap = first ? POINTS.animal : POINTS.animalAgain;
+        // owned by whoever landed here last; first-time bonus + perk only once per player per animal
+        var first = !p.friends[a.kind], owner = g.animalOwner[a.kind];
+        var mine = owner === p.id, stolen = owner != null && !mine;
+        var ap = mine ? POINTS.animalAgain : first ? POINTS.animal : POINTS.animalSteal;
         p.friends[a.kind] = true; p.score += ap;
-        if (first) p.stats.animals++;
+        if (!mine) { g.animalOwner[a.kind] = p.id; p.stats.animals++; if (stolen) p.stats.steals++; }
         var perk = first && !g.perkUsed ? a.perk : null;
-        addLog(p.name + (first ? ' befriended ' : ' fed ') + a.name + ' +' + ap + (perk === 'hop2' ? ', hops +2' : perk === 'respin' ? ', free spin!' : ''));
-        emit('animal', { player: p.id, kind: a.kind, sq: sq, points: ap, perk: perk, first: first });
+        var perkTxt = perk === 'hop2' ? ', hops +2' : perk === 'respin' ? ', free spin!' : '';
+        addLog(mine ? p.name + ' fed ' + a.name + ' +' + ap + perkTxt
+          : stolen ? p.name + ' won ' + a.name + ' over from ' + g.players[owner].name + '! +' + ap + perkTxt
+          : p.name + ' befriended ' + a.name + ' +' + ap + perkTxt);
+        emit('animal', { player: p.id, kind: a.kind, sq: sq, points: ap, perk: perk, first: first, from: stolen ? owner : null, mine: mine });
         if (perk) {
           g.perkUsed = true;
           if (perk === 'hop2') { startPath(computePath(sq, 2)); return; }
@@ -335,6 +445,17 @@
             if (g.pathIdx >= g.path.length) resolve();
             break;
           }
+          case 'offer':
+            if (p.type !== 'cpu') return; // humans choose with the banner buttons
+            if (g.timer > dt) { g.timer -= dt; return; }
+            used = g.timer; doReshuffle(); // a CPU always takes it
+            break;
+          case 'reshuffling': {
+            var ra = g.anim, needR = ra.dur - ra.t;
+            if (dt < needR) { ra.t += dt; return; }
+            used = needR; g.anim = null; g.phase = 'gap'; g.timer = T.gap;
+            break;
+          }
           case 'sliding': case 'climbing': {
             var a = g.anim, need3 = a.dur - a.t;
             if (dt < need3) { a.t += dt; return; }
@@ -359,7 +480,8 @@
   var api = {
     createDoodle: createDoodle, squareToCell: squareToCell, cellToSquare: cellToSquare, computePath: computePath,
     wheelSegmentAt: wheelSegmentAt, wheelTargetAngle: wheelTargetAngle,
-    pickHazard: pickHazard, randomName: randomName, cleanName: cleanName,
+    pickHazard: pickHazard, randomHazards: randomHazards, validHazards: validHazards, blockedSquares: blockedSquares,
+    BOARDS: BOARDS, BOARD_ORDER: BOARD_ORDER, RESHUFFLE_AT: RESHUFFLE_AT, randomName: randomName, cleanName: cleanName,
     HAZARDS: HAZARDS, NAME_ADJ: NAME_ADJ, NAME_ANIMAL: NAME_ANIMAL, NAME_MAX: NAME_MAX,
     SNAKES: SNAKES, ROPES: ROPES, ANIMALS: ANIMALS, CREATURES: CREATURES, TOKENS: TOKENS, POINTS: POINTS, TIMING: T,
     SIZE: SIZE, LAST: LAST, WHEEL_SEGMENTS: WHEEL_SEGMENTS
@@ -541,7 +663,8 @@
       tiles: ['#c9f0d9', '#fde8c6', '#d4ebfb', '#fbd5e2', '#e4dcfb', '#fff1b3'], tileAlpha: [1, 0.82],
       tileBorder: 'rgba(31,122,84,0.30)', tileShadow: 'rgba(31,94,66,0.10)',
       number: '#244637', numberHalo: 'rgba(255,255,255,0.85)', badge: '#0f766e', star: '#f59e0b',
-      pad: 'rgba(255,255,255,0.75)', dim: 'rgba(20,48,38,0.55)', tokenRing: 'rgba(20,40,32,0.6)', floaterStroke: 'rgba(255,255,255,0.95)'
+      pad: 'rgba(255,255,255,0.75)', dim: 'rgba(20,48,38,0.55)', tokenRing: 'rgba(20,40,32,0.6)', floaterStroke: 'rgba(255,255,255,0.95)',
+      dungeon: { bg: ['#3a4a40', '#26332c'], stones: ['#b9c6bb', '#a7b7ab', '#c3ccc0', '#9fb1a4', '#b1c2a9'], mortar: 'rgba(38,52,44,0.55)', moss: 'rgba(74,140,84,0.55)', number: '#17231c', halo: 'rgba(255,255,255,0.8)', badge: '#14532d' }
     },
     sunset: {
       name: 'Sunset Pop', meta: '#ffd9c7',
@@ -549,7 +672,8 @@
       tiles: ['#ffb3a0', '#ffd2b4', '#ffc7dd', '#dcc4fb', '#ffe3a3', '#f9b8cf'], tileAlpha: [0.92, 0.74],
       tileBorder: 'rgba(255,255,255,0.75)', tileShadow: 'rgba(138,45,80,0.12)',
       number: '#5a1f3b', numberHalo: 'rgba(255,255,255,0.7)', badge: '#9d174d', star: '#f97316',
-      pad: 'rgba(255,255,255,0.6)', dim: 'rgba(70,22,48,0.55)', tokenRing: 'rgba(70,20,45,0.6)', floaterStroke: 'rgba(255,255,255,0.95)'
+      pad: 'rgba(255,255,255,0.6)', dim: 'rgba(70,22,48,0.55)', tokenRing: 'rgba(70,20,45,0.6)', floaterStroke: 'rgba(255,255,255,0.95)',
+      dungeon: { bg: ['#4f2f3a', '#2e1c26'], stones: ['#dcb9a6', '#cfa898', '#e3c3ae', '#c89d8d', '#d6ae9a'], mortar: 'rgba(70,32,40,0.55)', moss: 'rgba(160,82,96,0.4)', number: '#3a1424', halo: 'rgba(255,255,255,0.75)', badge: '#7f1d3f' }
     },
     ocean: {
       name: 'Ocean Breeze', meta: '#0a2a43',
@@ -557,7 +681,8 @@
       tiles: ['#11698a', '#16858c', '#0e5779', '#24938a', '#1a73a3', '#2d7f9b'], tileAlpha: [0.62, 0.46],
       tileBorder: 'rgba(148,233,255,0.45)', tileShadow: 'rgba(0,0,0,0.18)',
       number: '#eafcff', numberHalo: 'rgba(5,30,48,0.7)', badge: '#fde68a', star: '#facc15',
-      pad: 'rgba(255,255,255,0.16)', dim: 'rgba(3,18,32,0.62)', tokenRing: 'rgba(0,0,0,0.55)', floaterStroke: 'rgba(5,25,40,0.9)'
+      pad: 'rgba(255,255,255,0.16)', dim: 'rgba(3,18,32,0.62)', tokenRing: 'rgba(0,0,0,0.55)', floaterStroke: 'rgba(5,25,40,0.9)',
+      dungeon: { bg: ['#0f1c26', '#0a131b'], stones: ['#3f5868', '#4a6474', '#38505f', '#53697a', '#44606b'], mortar: 'rgba(4,12,18,0.7)', moss: 'rgba(60,170,160,0.35)', number: '#f1f7fb', halo: 'rgba(4,14,22,0.85)', badge: '#fde68a' }
     }
   };
   var THEME_ORDER = ['mint', 'sunset', 'ocean'];
@@ -720,34 +845,59 @@
       }
       c.restore();
     }
+    function drawDungeonTile(c, x, y, n, D) {
+      var base = D.stones[(n * 7 + (n >> 2)) % D.stones.length], r = s * 0.08;
+      c.fillStyle = 'rgba(0,0,0,0.35)'; rr(c, x + 1.5, y + 2.5, s - 3, s - 3, r); c.fill();
+      c.fillStyle = base; rr(c, x + 1.5, y + 1.5, s - 3, s - 3, r); c.fill();
+      c.save(); rr(c, x + 1.5, y + 1.5, s - 3, s - 3, r); c.clip();
+      // brick courses: 3 rows, offset joints
+      c.strokeStyle = D.mortar; c.lineWidth = Math.max(1, s * 0.03);
+      for (var row = 1; row < 3; row++) { c.beginPath(); c.moveTo(x, y + row * s / 3); c.lineTo(x + s, y + row * s / 3); c.stroke(); }
+      for (row = 0; row < 3; row++) {
+        var off = (row + n) % 2 ? s * 0.5 : s * 0.25;
+        for (var bx = off; bx < s; bx += s * 0.5) { c.beginPath(); c.moveTo(x + bx, y + row * s / 3); c.lineTo(x + bx, y + (row + 1) * s / 3); c.stroke(); }
+      }
+      c.fillStyle = 'rgba(255,255,255,0.18)'; c.fillRect(x, y + 1.5, s, s * 0.05); // top light
+      if ((n * 13) % 7 === 0) { c.fillStyle = D.moss; c.beginPath(); c.ellipse(x + s * 0.75, y + s * 0.9, s * 0.22, s * 0.1, 0, 0, TAU); c.fill(); }
+      if ((n * 11) % 9 === 0) { c.strokeStyle = D.mortar; c.lineWidth = 1; c.beginPath(); c.moveTo(x + s * 0.6, y + s * 0.4); c.lineTo(x + s * 0.68, y + s * 0.55); c.lineTo(x + s * 0.63, y + s * 0.7); c.stroke(); }
+      c.restore();
+      c.strokeStyle = 'rgba(0,0,0,0.35)'; c.lineWidth = 1; rr(c, x + 1.5, y + 1.5, s - 3, s - 3, r); c.stroke();
+    }
     function drawSquares(c) {
+      var D = G.board === 'dungeon' ? TH.dungeon : null;
       var grd = c.createLinearGradient(0, 0, size, size);
-      grd.addColorStop(0, TH.bg[0]); grd.addColorStop(1, TH.bg[1]);
+      grd.addColorStop(0, D ? D.bg[0] : TH.bg[0]); grd.addColorStop(1, D ? D.bg[1] : TH.bg[1]);
       c.fillStyle = grd; c.fillRect(0, 0, size, size);
-      drawPattern(c);
+      if (!D) drawPattern(c);
       var fs = Math.max(8, Math.round(s * 0.24));
       for (var n = 1; n <= LAST; n++) {
         var cl = squareToCell(n), x = cl.col * s, y = (SIZE - 1 - cl.row) * s;
-        var col = TH.tiles[(cl.row * 2 + cl.col * 3) % TH.tiles.length];
-        c.globalAlpha = 1; c.fillStyle = TH.tileShadow; rr(c, x + 2, y + 3, s - 4, s - 4, s * 0.18); c.fill();
-        c.globalAlpha = TH.tileAlpha[(cl.row + cl.col) % 2];
-        c.fillStyle = col; rr(c, x + 2, y + 2, s - 4, s - 4, s * 0.18); c.fill();
-        c.globalAlpha = 1; c.strokeStyle = TH.tileBorder; c.lineWidth = 1.2; c.setLineDash([s * 0.09, s * 0.07]); c.stroke(); c.setLineDash([]);
+        if (D) drawDungeonTile(c, x, y, n, D);
+        else {
+          var col = TH.tiles[(cl.row * 2 + cl.col * 3) % TH.tiles.length];
+          c.globalAlpha = 1; c.fillStyle = TH.tileShadow; rr(c, x + 2, y + 3, s - 4, s - 4, s * 0.18); c.fill();
+          c.globalAlpha = TH.tileAlpha[(cl.row + cl.col) % 2];
+          c.fillStyle = col; rr(c, x + 2, y + 2, s - 4, s - 4, s * 0.18); c.fill();
+          c.globalAlpha = 1; c.strokeStyle = TH.tileBorder; c.lineWidth = 1.2; c.setLineDash([s * 0.09, s * 0.07]); c.stroke(); c.setLineDash([]);
+        }
         c.font = '800 ' + fs + 'px ui-sans-serif, system-ui, sans-serif';
         c.textAlign = 'left'; c.textBaseline = 'top';
-        c.lineWidth = Math.max(2, fs * 0.22); c.lineJoin = 'round'; c.strokeStyle = TH.numberHalo;
+        c.lineWidth = Math.max(2, fs * 0.22); c.lineJoin = 'round'; c.strokeStyle = D ? D.halo : TH.numberHalo;
         c.strokeText(String(n), x + s * 0.11, y + s * 0.09);
-        c.fillStyle = TH.number; c.fillText(String(n), x + s * 0.11, y + s * 0.09);
+        c.fillStyle = D ? D.number : TH.number; c.fillText(String(n), x + s * 0.11, y + s * 0.09);
       }
       // start + finish badges
       var a = center(1), b = center(LAST);
       c.textAlign = 'center'; c.textBaseline = 'middle';
       c.font = '900 ' + Math.max(7, Math.round(s * 0.2)) + 'px ui-sans-serif, system-ui, sans-serif';
-      c.fillStyle = TH.badge; c.fillText('START', a.x, a.y + s * 0.28);
+      var badge = D ? D.badge : TH.badge;
+      c.lineWidth = 3; c.strokeStyle = D ? D.halo : 'rgba(0,0,0,0)'; c.strokeText('START', a.x, a.y + s * 0.28);
+      c.fillStyle = badge; c.fillText('START', a.x, a.y + s * 0.28);
       c.save(); c.translate(b.x, b.y + s * 0.06);
       star(c, 0, 0, s * 0.3, s * 0.13, TH.star);
       c.restore();
-      c.fillStyle = TH.badge; c.fillText('FINISH', b.x, b.y + s * 0.38);
+      c.strokeText('FINISH', b.x, b.y + s * 0.38);
+      c.fillStyle = badge; c.fillText('FINISH', b.x, b.y + s * 0.38);
     }
     function star(c, x, y, R, r, fill) {
       c.beginPath();
@@ -1032,6 +1182,72 @@
       }
     }
 
+    // ---------- board styles: ropes / ladders / dungeon stairs ----------
+    function linePoints(bottom, top) { // straight boost, pts[0] = top
+      var a = center(top), b = center(bottom), pts = [];
+      for (var i = 0; i <= 24; i++) { var t = i / 24; pts.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }); }
+      return pts;
+    }
+    function boostPoints(bottom, top) { return G.board === 'ropes' ? ropePoints(bottom, top, 0) : linePoints(bottom, top); }
+    function drawLadder(bottom, top) {
+      var a = center(bottom), b = center(top), dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len, nx = -uy, ny = ux;
+      var hw = s * 0.17, i;
+      ctx.save(); ctx.lineCap = 'round';
+      var n = Math.max(2, Math.floor(len / (s * 0.27)));
+      for (i = 1; i < n; i++) { // rungs
+        var t = i / n, cx = a.x + dx * t, cy = a.y + dy * t;
+        ctx.strokeStyle = '#3b2108'; ctx.lineWidth = Math.max(2.5, s * 0.075) + 2.5;
+        ctx.beginPath(); ctx.moveTo(cx + nx * hw, cy + ny * hw); ctx.lineTo(cx - nx * hw, cy - ny * hw); ctx.stroke();
+        ctx.strokeStyle = '#e0a458'; ctx.lineWidth = Math.max(2.5, s * 0.075);
+        ctx.beginPath(); ctx.moveTo(cx + nx * hw, cy + ny * hw); ctx.lineTo(cx - nx * hw, cy - ny * hw); ctx.stroke();
+      }
+      [-1, 1].forEach(function (k) { // rails, a little past both ends
+        var x0 = a.x + nx * hw * k - ux * s * 0.14, y0 = a.y + ny * hw * k - uy * s * 0.14, x1 = b.x + nx * hw * k + ux * s * 0.12, y1 = b.y + ny * hw * k + uy * s * 0.12;
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = s * 0.11 + 4; ctx.beginPath(); ctx.moveTo(x0, y0 + 2); ctx.lineTo(x1, y1 + 2); ctx.stroke();
+        ctx.strokeStyle = '#3b2108'; ctx.lineWidth = s * 0.11 + 2.5; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        ctx.strokeStyle = '#b8742a'; ctx.lineWidth = s * 0.11; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,230,180,0.55)'; ctx.lineWidth = Math.max(1, s * 0.025); ctx.beginPath(); ctx.moveTo(x0 - nx * s * 0.02, y0 - ny * s * 0.02); ctx.lineTo(x1 - nx * s * 0.02, y1 - ny * s * 0.02); ctx.stroke();
+      });
+      ctx.restore();
+    }
+    function drawStairs(bottom, top) {
+      var a = center(bottom), b = center(top), dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len, nx = -uy, ny = ux;
+      var n = Math.max(3, Math.floor(len / (s * 0.24))), i, step = len / n;
+      ctx.save(); ctx.lineJoin = 'round';
+      for (i = 0; i < n; i++) {
+        var t0 = i / n, w = s * (0.24 - 0.07 * t0), x = a.x + dx * t0, y = a.y + dy * t0, d = step * 1.02;
+        var p1 = [x + nx * w, y + ny * w], p2 = [x - nx * w, y - ny * w], p3 = [p2[0] + ux * d, p2[1] + uy * d], p4 = [p1[0] + ux * d, p1[1] + uy * d];
+        poly(ctx, [[p1[0], p1[1] + 3], [p2[0], p2[1] + 3], [p3[0], p3[1] + 3], [p4[0], p4[1] + 3]], 'rgba(0,0,0,0.3)');
+        poly(ctx, [p1, p2, p3, p4], i % 2 ? '#8b8f98' : '#a3a7ae', '#2b2f36', 1.5);
+        var rz = d * 0.32; // shadowed riser at the back of each tread
+        poly(ctx, [[p4[0] - ux * rz, p4[1] - uy * rz], [p3[0] - ux * rz, p3[1] - uy * rz], p3, p4], 'rgba(30,34,42,0.45)');
+        // lit front edge of each step
+        ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = Math.max(1.5, s * 0.04);
+        ctx.beginPath(); ctx.moveTo(p1[0] + ux * s * 0.03, p1[1] + uy * s * 0.03); ctx.lineTo(p2[0] + ux * s * 0.03, p2[1] + uy * s * 0.03); ctx.stroke();
+        circle(ctx, x + ux * d * 0.5 + nx * w * 0.4, y + uy * d * 0.5 + ny * w * 0.4, Math.max(0.8, s * 0.018), 'rgba(40,44,52,0.5)');
+      }
+      ctx.restore();
+    }
+    function drawBoost(bottom, top, now) {
+      if (G.board === 'ladders') drawLadder(bottom, top);
+      else if (G.board === 'dungeon') drawStairs(bottom, top);
+      else drawRopeLine(bottom, top, now);
+    }
+    // torches on the dungeon walls (edge tiles without items)
+    var TORCH_SQ = [70, 41, 90, 20, 11, 80];
+    function drawTorches(now) {
+      TORCH_SQ.forEach(function (n, i) {
+        var c = center(n), left = squareToCell(n).col === 0, x = c.x + (left ? -s * 0.3 : s * 0.3), y = c.y + s * 0.16;
+        var fl = 0.75 + Math.sin(now * 0.013 + i * 1.7) * 0.12 + Math.sin(now * 0.031 + i) * 0.08;
+        var gl = ctx.createRadialGradient(x, y - s * 0.2, 0, x, y - s * 0.2, s * 0.85 * fl);
+        gl.addColorStop(0, 'rgba(255,190,90,' + (0.55 * fl).toFixed(3) + ')'); gl.addColorStop(1, 'rgba(255,150,50,0)');
+        ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(x, y - s * 0.2, s * 0.85 * fl, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#3f2a14'; ctx.fillRect(x - s * 0.035, y - s * 0.12, s * 0.07, s * 0.26);
+        ctx.fillStyle = '#6b7280'; ctx.fillRect(x - s * 0.07, y - s * 0.15, s * 0.14, s * 0.05);
+        ctx.save(); ctx.translate(x, y - s * 0.27); ctx.scale(fl, 0.9 + (fl - 0.75)); flame(ctx, 0, 0, s * 0.17, now + i * 300); ctx.restore();
+      });
+    }
+
     function emojiSprite(emoji) {
       var key = emoji + '@' + s;
       if (emojiCache[key]) return emojiCache[key];
@@ -1041,11 +1257,36 @@
       c2.fillText(emoji, px / 2, px / 2 + px * 0.05);
       return (emojiCache[key] = cv);
     }
+    // ring in the owner's token colour around an owned animal / creature
+    function ownerRing(x, y, r, color) {
+      ctx.save();
+      ctx.lineWidth = Math.max(2.5, s * 0.075); ctx.strokeStyle = TH.tokenRing; ctx.beginPath(); ctx.arc(x, y, r + 1, 0, TAU); ctx.stroke();
+      ctx.lineWidth = Math.max(2, s * 0.055); ctx.strokeStyle = color; ctx.beginPath(); ctx.arc(x, y, r + 1, 0, TAU); ctx.stroke();
+      ctx.restore();
+    }
+    // ownership swap: old colour shrinks away, new colour ring bursts out
+    var swaps = [], reshufflePop = false;
+    function drawSwaps(dt) {
+      for (var i = swaps.length - 1; i >= 0; i--) {
+        var w = swaps[i]; w.t += dt / 900;
+        if (w.t >= 1) { swaps.splice(i, 1); continue; }
+        var c = center(w.sq), e = w.t;
+        ctx.save(); ctx.lineWidth = Math.max(2, s * 0.08);
+        if (w.from) { ctx.globalAlpha = 1 - e; ctx.strokeStyle = w.from; ctx.beginPath(); ctx.arc(c.x, c.y, s * 0.4 * (1 - e * 0.8), 0, TAU); ctx.stroke(); }
+        ctx.globalAlpha = 1 - e * 0.6; ctx.strokeStyle = w.to; ctx.beginPath(); ctx.arc(c.x, c.y, s * (0.2 + e * 0.5), -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, e * 1.6)); ctx.stroke();
+        if (w.from) { // little swap arrows
+          ctx.globalAlpha = 1 - e; ctx.fillStyle = w.to; ctx.font = '900 ' + Math.round(s * 0.3) + 'px ui-sans-serif, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText('\u21c4', c.x, c.y - s * (0.5 + e * 0.3));
+        }
+        ctx.restore();
+      }
+    }
     function drawItems(now) {
       var cur = G.current();
       ANIMALS.forEach(function (a, i) {
-        var p = center(a.sq), bob = Math.sin(now * 0.004 + i) * s * 0.03, sz = s * 0.56;
+        var p = center(a.sq), bob = Math.sin(now * 0.004 + i) * s * 0.03, sz = s * 0.56, own = G.animalOwner[a.kind];
         circle(ctx, p.x + s * 0.08, p.y + s * 0.08, s * 0.3, TH.pad);
+        if (own != null && G.players[own]) ownerRing(p.x + s * 0.08, p.y + s * 0.08, s * 0.31, G.players[own].token.color);
         ctx.drawImage(emojiSprite(a.emoji), p.x + s * 0.08 - sz / 2, p.y + s * 0.08 - sz / 2 + bob, sz, sz);
         if (a.perk) {
           var lbl = a.perk === 'hop2' ? '+2' : '\u21bb';
@@ -1054,11 +1295,10 @@
           circle(ctx, p.x + s * 0.3, p.y - s * 0.28, s * 0.13, a.perk === 'hop2' ? '#22c55e' : '#8b5cf6');
           ctx.fillStyle = '#fff'; ctx.fillText(lbl, p.x + s * 0.3, p.y - s * 0.27);
         }
-        if (cur && cur.friends[a.kind]) { ctx.fillStyle = '#fb7185'; ctx.font = Math.round(s * 0.2) + 'px sans-serif'; ctx.fillText('\u2665', p.x - s * 0.28, p.y + s * 0.3); }
       });
       CREATURES.forEach(function (c, i) {
-        if (G.collected[c.id] != null) return;
-        var p = center(c.sq), y = p.y + s * 0.06 + Math.sin(now * 0.004 + i * 2) * s * 0.04;
+        var p = center(c.sq), y = p.y + s * 0.06 + Math.sin(now * 0.004 + i * 2) * s * 0.04, own = G.collected[c.id];
+        if (own != null && G.players[own]) ownerRing(p.x, p.y + s * 0.06, s * 0.36, G.players[own].token.color);
         var gl = ctx.createRadialGradient(p.x, y, 0, p.x, y, s * 0.45);
         gl.addColorStop(0, c.color + '77'); gl.addColorStop(1, c.color + '00');
         ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(p.x, y, s * 0.45, 0, TAU); ctx.fill();
@@ -1076,7 +1316,7 @@
         if ((G.phase === 'sliding' || G.phase === 'climbing') && G.anim) {
           var e = G.anim.t / G.anim.dur, pts;
           if (G.anim.type === 'slide') { var hd = G.anim.from, nw = performance.now(); pts = hazardPoints(hd, G.anim.to, nw * 0.012 + snakeIndex(hd), 1 + Math.sin(nw * 0.03) * 0.5); }
-          else pts = ropePoints(G.anim.from, G.anim.to, 0);
+          else pts = boostPoints(G.anim.from, G.anim.to);
           var t = G.anim.type === 'slide' ? e * e * (3 - 2 * e) : 1 - (e * e * (3 - 2 * e));
           var q = along(pts, t);
           return { x: q.x, y: q.y, moving: true };
@@ -1091,8 +1331,7 @@
       }
       return c;
     }
-    var SNAKE_KEYS = Object.keys(SNAKES).map(Number);
-    function snakeIndex(head) { return SNAKE_KEYS.indexOf(head); }
+    function snakeIndex(head) { return Object.keys(G.snakes).map(Number).indexOf(head); }
 
     function drawToken(p, x, y, r, active, now) {
       ctx.save(); ctx.translate(x, y);
@@ -1220,9 +1459,17 @@
       if (shake > 0) { ctx.translate((Math.random() - 0.5) * s * 0.3 * shake, (Math.random() - 0.5) * s * 0.3 * shake); shake = Math.max(0, shake - dt / 500); }
       ctx.drawImage(boardCache, 0, 0, size, size);
       drawItems(now);
-      Object.keys(ROPES).forEach(function (b) { drawRopeLine(+b, ROPES[b], now); });
+      if (G.board === 'dungeon') drawTorches(now);
+      Object.keys(ROPES).forEach(function (b) { drawBoost(+b, ROPES[b], now); });
       var sliding = G.phase === 'sliding' && G.anim ? G.anim.from : -1;
-      SNAKE_KEYS.forEach(function (h, i) { drawHazard(G.hazard, h, SNAKES[h], i, now, h === sliding); });
+      if (G.phase === 'reshuffling' && G.anim) { // old hazards fade out, new ones pop in
+        var k = G.anim.t / G.anim.dur, map = k < 0.5 ? G.anim.old : G.snakes, al = k < 0.5 ? 1 - k * 2 : (k - 0.5) * 2;
+        if (k >= 0.5 && !reshufflePop) { reshufflePop = true; Object.keys(G.snakes).forEach(function (h) { var c = center(+h); burst(c.x, c.y, ['#fde68a', '#f0abfc', '#fff', '#67e8f9'], 10); }); }
+        ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, al));
+        Object.keys(map).map(Number).forEach(function (h, i) { drawHazard(G.hazard, h, map[h], i, now, true); });
+        ctx.restore();
+      } else Object.keys(G.snakes).map(Number).forEach(function (h, i) { drawHazard(G.hazard, h, G.snakes[h], i, now, h === sliding); });
+      drawSwaps(dt);
       var cur = G.current();
       if (cur && sliding > 0 && dt > 0) slideTrail(dt, tokenPos(cur, G.turn));
       G.players.forEach(function (p, i) { if (p !== cur) { var q = tokenPos(p, i); drawToken(p, q.x, q.y, s * 0.24, false, now); } });
@@ -1255,6 +1502,7 @@
         if (got) n++;
         sl.el.classList.toggle('got', got);
         sl.own.style.background = got ? G.players[who].token.color : 'transparent';
+        if (got) sl.el.style.setProperty('--oc', G.players[who].token.color); else sl.el.style.removeProperty('--oc');
         sl.el.title = c.name + (got ? ' (caught by ' + G.players[who].name + ')' : ' on square ' + c.sq);
       });
       trayCount.textContent = n + '/' + CREATURES.length;
@@ -1331,24 +1579,28 @@
       }).join('');
       var st = G.stats;
       showOverlay('<h2>Doodle Wheel</h2>' +
-        '<p>Snakes and ladders, doodle style. Spin the <b>1\u201310 wheel</b> to move, climb <b>ropes</b>, dodge a <b>new slide-down animal</b> every game, befriend animals and catch creatures on 70\u201399. Land on <b>exactly 100</b> to win.</p>' +
+        '<p>Spin the <b>1\u201310 wheel</b>, climb <b>' + BOARDS[G.board].boosts + '</b>, dodge a <b>new slide-down animal</b> each game and win animals and creatures from each other. Land on <b>exactly 100</b> to win.</p>' +
         '<div class="dw-seats">' + rows + '</div>' +
+        '<div class="dw-boardpick" role="radiogroup" aria-label="Board style"><span>Board</span><div class="segs">' + BOARD_ORDER.map(function (id) {
+          var bd = BOARDS[id];
+          return '<button type="button" class="seg' + (G.board === id ? ' on' : '') + '" data-board="' + id + '" role="radio" aria-checked="' + (G.board === id) + '">' + bd.emoji + ' ' + bd.name + '</button>';
+        }).join('') + '</div></div>' +
         '<p class="dw-small">Best ' + G.high + ' pts \u00b7 best collection ' + G.bestCollection + '/8 \u00b7 ' + st.wins + ' wins in ' + st.games + ' games</p>' +
         '<button type="button" class="primary" data-ov="start">Start game</button>');
     }
     function pauseOverlay() { overlayMode = 'pause'; showOverlay('<h2>Paused</h2><p>Press <kbd>P</kbd> or tap Resume.</p><button type="button" class="primary" data-ov="resume">Resume</button>'); }
     function winOverlay(d) {
-      var w = G.players[d.player], hz = G.hazardInfo();
+      var w = G.players[d.player], hz = G.hazardInfo(), bd = G.boardInfo();
       overlayMode = 'win';
       var rowsH = G.players.map(function (p) {
-        var chips = p.creatures.map(function (k) { return '<img alt="' + CREATURE_BY_ID[k].name + '" title="' + CREATURE_BY_ID[k].name + '" src="' + creatureImg(k) + '">'; }).join('');
-        return '<tr' + (p === w ? ' class="win"' : '') + ' style="--tc:' + p.token.color + '"><td><i class="dw-dot"></i>' + esc(p.name) + '</td><td>' + p.score + '</td><td>' + p.stats.spins + '</td><td>' + p.stats.snakes + '</td><td>' + p.stats.ropes + '</td><td>' + p.stats.animals + '</td><td class="cr">' + (chips || p.creatures.length) + '</td></tr>';
+        var chips = G.ownedCreatures(p.id).map(function (k) { return '<img alt="' + CREATURE_BY_ID[k].name + '" title="' + CREATURE_BY_ID[k].name + '" src="' + creatureImg(k) + '">'; }).join('');
+        return '<tr' + (p === w ? ' class="win"' : '') + ' style="--tc:' + p.token.color + '"><td><i class="dw-dot"></i>' + esc(p.name) + '</td><td>' + p.score + '</td><td>' + p.stats.spins + '</td><td>' + p.stats.snakes + '</td><td>' + p.stats.ropes + '</td><td>' + G.ownedAnimals(p.id) + '</td><td class="cr">' + (chips || '0') + '</td></tr>';
       }).join('');
       var hits = G.players.reduce(function (m, p) { return m + p.stats.snakes; }, 0);
       showOverlay('<h2>\u{1F3C6} ' + esc(w.name) + ' wins!</h2>' +
         '<p>Landed exactly on 100 after ' + w.stats.spins + ' spins.</p>' +
         '<p class="dw-small dw-win-hz">This round: ' + hz.emoji + ' ' + hz.name + ' \u00b7 ' + hz.plural + ' hit: ' + hits + '</p>' +
-        '<table class="dw-table"><thead><tr><th></th><th>Pts</th><th>Spins</th><th title="' + hz.plural + ' hit">' + hz.emoji + '</th><th>\u{1FA62}</th><th>\u{1F43E}</th><th>Creatures</th></tr></thead><tbody>' + rowsH + '</tbody></table>' +
+        '<table class="dw-table"><thead><tr><th></th><th>Pts</th><th>Spins</th><th title="' + hz.plural + ' hit">' + hz.emoji + '</th><th title="' + bd.Boosts + ' climbed">' + bd.emoji + '</th><th title="Animals owned now">\u{1F43E}</th><th title="Creatures owned now">Creatures</th></tr></thead><tbody>' + rowsH + '</tbody></table>' +
         (d.newRecord ? '<p class="record">New high score: ' + d.high + '!</p>' : '<p>Best score: ' + d.high + '</p>') +
         '<p class="dw-small">Best collection: ' + d.bestCollection + '/8' + (d.newBestCollection ? ' <span class="record">new best!</span>' : '') + '</p>' +
         '<div class="dw-ov-btns"><button type="button" class="primary" data-ov="again">Play again</button><button type="button" data-ov="setup">New game</button></div>');
@@ -1377,6 +1629,7 @@
         saveSeats();
         setupOverlay(false); return;
       }
+      if (b.dataset.board) { G.setBoard(b.dataset.board); setupOverlay(false); return; }
       if (b.dataset.reroll != null) {
         var i = +b.dataset.reroll, inp = overlayCard.querySelector('input[data-name="' + i + '"]');
         var nm = rerollSeat(i);
@@ -1405,6 +1658,26 @@
       particles = []; floaters = []; flyers = []; confetti = [];
       G.start(seatList(), opts); hideOverlay(); syncTray(); syncPlayers(); syncLog(); syncUI(true);
     }
+    // 5-0 reshuffle banner (one-time, declinable; a CPU takes it by itself)
+    var offerEl = document.createElement('div');
+    offerEl.className = 'dw-offer'; offerEl.id = 'dwOffer'; offerEl.setAttribute('role', 'dialog'); offerEl.setAttribute('aria-live', 'assertive');
+    boardInner.appendChild(offerEl);
+    function showOffer() {
+      var p = G.current(), hz = G.hazardInfo(), bd = G.boardInfo();
+      if (!p) return;
+      offerEl.style.setProperty('--tc', p.token.color);
+      offerEl.innerHTML = '<div class="dw-offer-txt"><b>' + esc(p.name) + '</b> climbed ' + p.stats.ropes + ' ' + bd.boosts + ' to 0! ' +
+        (p.type === 'cpu' ? 'Reshuffling the ' + hz.plural + '\u2026' : 'Reshuffle the ' + hz.plural + '?') + '</div>' +
+        (p.type === 'cpu' ? '' : '<div class="dw-offer-btns"><button type="button" class="primary" data-offer="yes">\u{1F500} Reshuffle hazards</button><button type="button" data-offer="no">No thanks</button></div>');
+      offerEl.classList.add('show');
+    }
+    function hideOffer() { offerEl.classList.remove('show'); }
+    offerEl.addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.offer === 'yes') G.acceptReshuffle(); else G.declineReshuffle();
+      syncUI(true);
+    });
+    offerEl.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
     function syncHazard(pop) {
       var hz = G.hazardInfo();
       if (!hazardEl) return;
@@ -1459,14 +1732,26 @@
         if (hs.trail) burst(c.x, c.y, hs.trail, 16, hz.id === 'caterpillar' ? 'leaf' : 'drop');
         floater(hz.emoji + ' ' + hz.sfx + ' \u2193' + d.to, c.x, c.y - s * 0.4, '#fca5a5');
       }
-      else if (type === 'rope') { c = center(d.from); burst(c.x, c.y, ['#c99554', '#fde68a', '#fff'], 14); floater('Rope! \u2191' + d.to + ' +' + d.points, c.x, c.y - s * 0.4, '#fcd34d'); }
+      else if (type === 'rope') {
+        var bdi = G.boardInfo(); c = center(d.from);
+        burst(c.x, c.y, G.board === 'dungeon' ? ['#d1d5db', '#9ca3af', '#fde68a'] : ['#c99554', '#fde68a', '#fff'], 14);
+        floater(bdi.Boosts === 'Stairs' ? 'Stairs! \u2191' + d.to + ' +' + d.points : bdi.boost.charAt(0).toUpperCase() + bdi.boost.slice(1) + '! \u2191' + d.to + ' +' + d.points, c.x, c.y - s * 0.4, '#fcd34d');
+      }
+      else if (type === 'offer') showOffer();
+      else if (type === 'reshuffle') {
+        hideOffer(); reshufflePop = false; shake = 0.6;
+        Object.keys(d.old).forEach(function (h) { var cc = center(+h); burst(cc.x, cc.y, ['#e9d5ff', '#fff', '#a5b4fc'], 8); });
+        floater('\u{1F500} Reshuffle!', size / 2, size * 0.45, '#c4b5fd');
+      } else if (type === 'decline') hideOffer();
       else if (type === 'animal') {
-        c = center(d.sq); burst(c.x, c.y, ['#f9a8d4', '#fda4af', '#fde68a', '#fff'], 14, 'heart');
+        c = center(d.sq);
+        if (!d.mine && G.players[d.player]) swaps.push({ sq: d.sq, t: 0, to: G.players[d.player].token.color, from: d.from != null && G.players[d.from] ? G.players[d.from].token.color : null }); burst(c.x, c.y, ['#f9a8d4', '#fda4af', '#fde68a', '#fff'], 14, 'heart');
         floater('+' + d.points + (d.perk === 'hop2' ? ' \u00b7 +2 squares' : d.perk === 'respin' ? ' \u00b7 free spin' : ''), c.x, c.y - s * 0.45, '#f9a8d4');
       } else if (type === 'catch') {
         var cr = CREATURE_BY_ID[d.kind]; c = center(d.sq);
         burst(c.x, c.y, [cr.color, '#fff', '#fde68a'], 26);
-        floater('Caught ' + d.name + '! +' + d.points, c.x, c.y - s * 0.5, cr.color);
+        if (G.players[d.player]) swaps.push({ sq: d.sq, t: 0, to: G.players[d.player].token.color, from: d.from != null && G.players[d.from] ? G.players[d.from].token.color : null });
+        floater((d.from != null ? 'Took ' : 'Caught ') + d.name + '! +' + d.points, c.x, c.y - s * 0.5, cr.color);
         flyers.push({ kind: d.kind, x: c.x, y: c.y, t: 0 });
         syncTray(d.kind);
       } else if (type === 'win') {
@@ -1474,7 +1759,12 @@
         setTimeout(function () { if (G.phase === 'over') winOverlay(d); }, 1400);
       } else if (type === 'spun') { lastEl.textContent = G.players[d.player].name + ' spun ' + d.result; }
       if (type === 'log') syncLog();
-      if (type === 'start') { hazardSeen = true; syncHazard(true); }
+      if (type === 'start') { // fresh board: clear leftover effects from the last game
+        hazardSeen = true; syncHazard(true); hideOffer(); swaps = [];
+        particles = []; floaters = []; flyers = []; confetti = [];
+        syncTray(); syncLog(); lastEl.textContent = 'Tap or Space';
+      }
+      if (type === 'board') { if (size && boardCache.width) drawSquares(bctx); }
       if (type !== 'hop') syncPlayers(); else syncPlayersPos();
     };
     function syncPlayersPos() {
@@ -1490,7 +1780,9 @@
       if (G.phase === 'idle') txt = 'Pick players and start';
       else if (G.phase === 'over') txt = '\u{1F3C6} ' + G.players[G.winner].name + ' wins!';
       else if (G.paused) txt = 'Paused';
-      else if (G.phase === 'ready') txt = human ? p.name + ': tap Spin' : p.name + ' is thinking\u2026';
+      else if (G.phase === 'ready') txt = human ? p.name + '\u2019s turn' : p.name + ' is thinking\u2026';
+      else if (G.phase === 'offer') txt = '\u{1F500} Reshuffle?';
+      else if (G.phase === 'reshuffling') txt = '\u{1F500} Reshuffling\u2026';
       else if (G.phase === 'spinning' || G.phase === 'landed') txt = p.name + ' is spinning\u2026';
       else txt = p.name + ' is moving\u2026';
       var st = txt + '|' + human + '|' + G.paused + '|' + G.speed + '|' + G.phase;
