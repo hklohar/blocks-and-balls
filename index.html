@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0a0e1c">
-  <title>Arcade: Blocks &amp; Balls and Doodle Wheel</title>
-  <meta name="description" content="Two browser games: Blocks &amp; Balls (Tetris with rolling marbles) and Doodle Wheel (a doodle-style snakes-and-ropes board game with a 1-10 spin wheel and collectible creatures).">
+  <title>Arcade: Blocks &amp; Balls, Doodle Wheel and Road Rumble</title>
+  <meta name="description" content="Three browser games: Blocks &amp; Balls (Tetris with rolling marbles), Doodle Wheel (a doodle-style snakes-and-ropes board game with a 1-10 spin wheel and collectible creatures) and Road Rumble (a top-down racer where you dodge or kick obstacles out of the way).">
   <link rel="icon" href="data:,">
   <link rel="apple-touch-icon" href="data:,">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,6 +15,7 @@
   <nav class="arcade-tabs" role="tablist" aria-label="Choose a game">
     <button type="button" role="tab" class="arcade-tab" id="tabBlocks" data-game="blocks" aria-controls="app" aria-selected="true"><span class="tab-ico" aria-hidden="true">🧱</span>Blocks &amp; Balls</button>
     <button type="button" role="tab" class="arcade-tab" id="tabDoodle" data-game="doodle" aria-controls="doodleApp" aria-selected="false"><span class="tab-ico" aria-hidden="true">🎡</span>Doodle Wheel</button>
+    <button type="button" role="tab" class="arcade-tab" id="tabRoad" data-game="road" aria-controls="roadApp" aria-selected="false"><span class="tab-ico" aria-hidden="true">🏍️</span>Road Rumble</button>
   </nav>
 
   <div class="app" id="app" role="tabpanel" aria-labelledby="tabBlocks">
@@ -148,8 +149,37 @@
     <footer class="site-footer">© 2026 Harish Lohar · <a href="mailto:hklohar@gmail.com">hklohar@gmail.com</a></footer>
   </div>
 
+  <div class="app rr-app" id="roadApp" role="tabpanel" aria-labelledby="tabRoad" hidden>
+    <header class="rr-head">
+      <h1 class="rr-title">Road <span>Rumble</span></h1>
+      <div class="rr-hud" aria-live="off">
+        <div class="rr-chip rr-chip-score"><small>Score</small><b id="rrScore">0</b><i id="rrCombo"></i></div>
+        <div class="rr-chip"><small>mph</small><b id="rrSpeed">0</b></div>
+        <div class="rr-chip"><small>Dist</small><b id="rrDist">0 m</b></div>
+        <div class="rr-chip"><small>High</small><b id="rrHigh">0</b></div>
+      </div>
+    </header>
+    <main class="rr-stage">
+      <div class="rr-wrap" id="rrWrap">
+        <div class="board-inner rr-inner" id="rrInner">
+          <canvas id="rrCanvas" aria-label="Road Rumble track"></canvas>
+          <div class="overlay show" id="rrOverlay"><div class="overlay-card rr-card" id="rrCard"></div></div>
+        </div>
+      </div>
+    </main>
+    <section class="rr-controls" id="rrControls" aria-label="Touch controls">
+      <button type="button" class="rr-btn rr-kick" id="rrKickL" aria-label="Kick left"><span>&#x21E4;</span>KICK</button>
+      <button type="button" class="rr-btn rr-steer" id="rrLeft" aria-label="Steer left">&#x25C0;</button>
+      <button type="button" class="rr-btn rr-steer" id="rrRight" aria-label="Steer right">&#x25B6;</button>
+      <button type="button" class="rr-btn rr-kick" id="rrKickR" aria-label="Kick right">KICK<span>&#x21E5;</span></button>
+    </section>
+    <p class="rr-keys"><kbd>&larr;</kbd><kbd>&rarr;</kbd> / <kbd>A</kbd><kbd>D</kbd> steer &middot; <kbd>Z</kbd><kbd>X</kbd> / <kbd>Q</kbd><kbd>E</kbd> kick left / right &middot; <kbd>Space</kbd> / <kbd>P</kbd> pause &middot; drag the track to steer</p>
+    <footer class="site-footer">© 2026 Harish Lohar · <a href="mailto:hklohar@gmail.com">hklohar@gmail.com</a></footer>
+  </div>
+
   <script src="arcade.js"></script>
   <script src="game.js"></script>
   <script src="doodle.js"></script>
+  <script src="road.js"></script>
 </body>
 </html>

@@ -1,8 +1,8 @@
 # Blocks & Balls Arcade
 
-Two small browser games on one page, in plain HTML, CSS and JavaScript with no build step or dependencies. Use the tabs at the top to switch games; only the active game takes input, and switching pauses the other one.
+Three small browser games on one page, in plain HTML, CSS and JavaScript with no build step or dependencies. Use the tabs at the top to switch games; only the active game takes input, and switching pauses the other one.
 
-**Play:** https://hklohar.github.io/blocks-and-balls/ (Doodle Wheel: https://hklohar.github.io/blocks-and-balls/#doodle)
+**Play:** https://hklohar.github.io/blocks-and-balls/ (Doodle Wheel: https://hklohar.github.io/blocks-and-balls/#doodle, Road Rumble: https://hklohar.github.io/blocks-and-balls/#road)
 
 ## Blocks & Balls (`game.js`)
 A Tetris-like game where some pieces are glossy balls that roll off ledges and settle like marbles.
@@ -33,3 +33,13 @@ Open `index.html` directly or serve the folder. `arcade.js` handles the tabs.
 ---
 
 Copyright (c) 2026 Harish Lohar <hklohar@gmail.com>. All rights reserved.
+
+## Road Rumble (`road.js`)
+A top-down, vertically scrolling racer (an original game inspired by classic combat racers). You start slow and keep speeding up; dodge obstacles or kick them off the track.
+- Pick a ride first (remembered): Motorcycle (default), Car, Bicycle, Boat, Jet Ski, Rocket, Fighter Jet. Each card shows top speed, acceleration, steering and kick power
+- Tracks follow the vehicle: road (cones, barrels, rival bikers, cars, oil slicks, potholes), water (buoys, logs, rival jet skis, barges, rocks, whirlpools) and sky (balloons, birds, drones, asteroids, storm clouds, space mines). The sky turns to space as you speed up
+- Handling: the Bicycle starts slow but is nimble; the Car is wide with slower steering but rams even cars aside; the Boat and Jet Ski drift; the Rocket and Jet are the fastest
+- Kick left or right to send an adjacent obstacle flying for bonus points (0.45 s cooldown). Heavy things (cars or barges for lighter rides) just bounce you off; oil, potholes, rocks, whirlpools, storm clouds and mines can only be dodged
+- Score = distance + kick bonuses + near-miss bonuses, with a combo multiplier (up to x5) for chaining them. High score and per-vehicle best are saved in this browser
+- Speed (mph), distance, score and high score are shown above the track. Spawns get denser and more varied as you go faster, but at least two lanes always stay open
+- Keyboard: ←/→ or A/D steer, Z/X or Q/E kick left/right, Space/P pause, Enter start. Touch: the big ◀ ▶ and KICK buttons, or drag on the track to steer

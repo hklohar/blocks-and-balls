@@ -1,11 +1,12 @@
-/* Arcade tab switcher for Blocks & Balls and Doodle Wheel.
+/* Arcade tab switcher for Blocks & Balls, Doodle Wheel and Road Rumble.
  * Only the active game receives input; switching pauses the other one.
  * Copyright (c) 2026 Harish Lohar. All rights reserved. */
 (function (root) {
   'use strict';
   var GAMES = {
     blocks: { panel: 'app', tab: 'tabBlocks', ui: 'blocksUI', title: 'Blocks & Balls · Arcade' },
-    doodle: { panel: 'doodleApp', tab: 'tabDoodle', ui: 'doodleUI', title: 'Doodle Wheel · Arcade' }
+    doodle: { panel: 'doodleApp', tab: 'tabDoodle', ui: 'doodleUI', title: 'Doodle Wheel · Arcade' },
+    road: { panel: 'roadApp', tab: 'tabRoad', ui: 'roadUI', title: 'Road Rumble · Arcade' }
   };
   var KEY = 'arcade-tab';
   var arcade = root.arcade = { current: null, select: select };
@@ -30,7 +31,8 @@
     var meta = document.querySelector('meta[name="theme-color"]');
     if (meta) {
       var th = id === 'doodle' && root.DoodleWheel && root.DoodleWheel.THEMES && root.doodleUI && root.DoodleWheel.THEMES[root.doodleUI.theme()];
-      meta.setAttribute('content', th ? th.meta : '#0a0e1c');
+      var rt = id === 'road' && root.road && root.RoadRumble && { road: '#24452a', water: '#0c4a6e', sky: '#1e3a8a' }[root.road.V().track];
+      meta.setAttribute('content', th ? th.meta : rt || '#0a0e1c');
     }
     try { localStorage.setItem(KEY, id); } catch (e) { /* ignore */ }
     if (!(opts && opts.initial) && root.history && history.replaceState) history.replaceState(null, '', '#' + id);
